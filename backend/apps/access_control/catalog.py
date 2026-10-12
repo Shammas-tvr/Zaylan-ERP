@@ -45,6 +45,31 @@ TENANT_PERMISSIONS: tuple[PermissionDef, ...] = (
     PermissionDef("roles.manage", "Manage roles", "roles", "Create roles and assign them."),
     PermissionDef("subscription.view", "View subscription", "subscription"),
     PermissionDef("audit.view", "View audit log", "audit"),
+    PermissionDef("expenses.view", "View expenses", "expenses"),
+    PermissionDef(
+        "expenses.submit",
+        "Submit expenses",
+        "expenses",
+        "Create and submit branch expenses for brand admin approval.",
+    ),
+    PermissionDef(
+        "expenses.approve",
+        "Approve expenses",
+        "expenses",
+        "Approve or reject expenses at brand level. Does not include self-approval.",
+    ),
+    PermissionDef(
+        "expenses.pay",
+        "Record expense payments",
+        "expenses",
+        "Mark approved expenses as paid. Separate from approval.",
+    ),
+    PermissionDef(
+        "expenses.configure",
+        "Configure expenses",
+        "expenses",
+        "Manage expense categories and recurring expense templates.",
+    ),
 )
 
 PLATFORM_PERMISSIONS: tuple[PermissionDef, ...] = (
@@ -77,15 +102,25 @@ TENANT_ROLE_TEMPLATES: tuple[RoleTemplate, ...] = (
     RoleTemplate(
         "branch_manager",
         "Branch Manager",
-        "Runs assigned branches.",
-        frozenset({"organization.view", "branches.view", "members.view"}),
+        "Runs assigned branches. May submit expenses; cannot approve them.",
+        frozenset(
+            {
+                "organization.view",
+                "branches.view",
+                "members.view",
+                "expenses.view",
+                "expenses.submit",
+            }
+        ),
         "BRANCHES",
     ),
     RoleTemplate(
         "cashier",
         "Cashier",
         "Operates the POS in assigned branches. Cannot see organization totals.",
-        frozenset({"organization.view", "branches.view"}),
+        frozenset(
+            {"organization.view", "branches.view", "expenses.view", "expenses.submit"}
+        ),
         "BRANCHES",
     ),
     RoleTemplate(
@@ -99,7 +134,17 @@ TENANT_ROLE_TEMPLATES: tuple[RoleTemplate, ...] = (
         "accountant",
         "Accountant",
         "Works with financial records within the assigned scope.",
-        frozenset({"organization.view", "branches.view", "subscription.view", "audit.view"}),
+        frozenset(
+            {
+                "organization.view",
+                "branches.view",
+                "subscription.view",
+                "audit.view",
+                "expenses.view",
+                "expenses.approve",
+                "expenses.pay",
+            }
+        ),
         "TENANT",
     ),
     RoleTemplate(

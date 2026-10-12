@@ -106,6 +106,18 @@ def invite_member(
         },
         request=request,
     )
+
+    def _send():
+        from apps.notifications.services import deliver_invitation
+
+        deliver_invitation(
+            organization_name=ctx.organization.name,
+            email=email,
+            invite_url=invitation_url(raw_token),
+            is_owner=False,
+        )
+
+    transaction.on_commit(_send)
     return invitation, raw_token
 
 

@@ -22,6 +22,9 @@ NON_BRANCHABLE_PERMISSIONS = frozenset(
         "roles.view",
         "roles.manage",
         "audit.view",
+        "expenses.approve",
+        "expenses.pay",
+        "expenses.configure",
     }
 )
 

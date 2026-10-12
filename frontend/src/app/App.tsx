@@ -1,0 +1,60 @@
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from '../shared/api/queryClient.ts'
+import { AcceptInvitePage } from '../features/auth/AcceptInvitePage.tsx'
+import { LoginPage } from '../features/auth/LoginPage.tsx'
+import { AuditPage } from '../features/audit/AuditPage.tsx'
+import { BranchesPage } from '../features/branches/BranchesPage.tsx'
+import { ApprovalsPage } from '../features/expenses/ApprovalsPage.tsx'
+import { ExpenseDetailPage } from '../features/expenses/ExpenseDetailPage.tsx'
+import { ExpensesPage } from '../features/expenses/ExpensesPage.tsx'
+import { RecurringPage } from '../features/expenses/RecurringPage.tsx'
+import { ExpenseReportsPage } from '../features/expenses/ReportsPage.tsx'
+import { OverviewPage } from '../features/overview/OverviewPage.tsx'
+import { PeoplePage } from '../features/people/PeoplePage.tsx'
+import { PlansPage } from '../features/platform/PlansPage.tsx'
+import { TenantsPage } from '../features/platform/TenantsPage.tsx'
+import { SettingsPage } from '../features/settings/SettingsPage.tsx'
+import { RequireSession, SessionGate } from './SessionGate.tsx'
+import { WorkspaceLayout } from './WorkspaceLayout.tsx'
+
+const router = createBrowserRouter([
+  {
+    element: <SessionGate />,
+    children: [
+      { path: '/login', element: <LoginPage /> },
+      { path: '/invitations/accept', element: <AcceptInvitePage /> },
+      {
+        element: <RequireSession />,
+        children: [
+          {
+            element: <WorkspaceLayout />,
+            children: [
+              { index: true, element: <OverviewPage /> },
+              { path: 'branches', element: <BranchesPage /> },
+              { path: 'expenses', element: <ExpensesPage /> },
+              { path: 'expenses/approvals', element: <ApprovalsPage /> },
+              { path: 'expenses/recurring', element: <RecurringPage /> },
+              { path: 'expenses/reports', element: <ExpenseReportsPage /> },
+              { path: 'expenses/:expenseId', element: <ExpenseDetailPage /> },
+              { path: 'people', element: <PeoplePage /> },
+              { path: 'settings', element: <SettingsPage /> },
+              { path: 'audit', element: <AuditPage /> },
+              { path: 'platform/brands', element: <TenantsPage /> },
+              { path: 'platform/tenants', element: <Navigate to="/platform/brands" replace /> },
+              { path: 'platform/plans', element: <PlansPage /> },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+])
+
+export function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  )
+}

@@ -1,27 +1,4 @@
-export type ApiErrorBody = {
-  error: { code: string; message: string; details?: unknown; request_id?: string }
-}
-
-export type Paginated<T> = {
-  count: number
-  next: string | null
-  previous: string | null
-  results: T[]
-}
-
-export type User = {
-  id: string
-  email: string
-  full_name: string
-  date_joined?: string
-  platform_permissions?: string[]
-}
-
-export type Session = {
-  access: string
-  user: User
-  organization_id?: string
-}
+export type OrgStatus = 'pending' | 'active' | 'suspended' | 'deactivated'
 
 export type Branding = {
   display_name: string
@@ -33,123 +10,245 @@ export type Branding = {
   text_color: string
 }
 
-export type OrganizationSummary = {
-  id: string
-  slug: string
-  name: string
-  industry: string
-  status: string
-  branding?: Branding
-}
-
-export type MembershipSummary = {
-  id: string
-  organization: OrganizationSummary
-  is_owner: boolean
-  status: string
-  joined_at: string
-}
-
 export type Organization = {
   id: string
-  slug: string
   name: string
   legal_name: string
+  slug: string
   industry: string
-  status: string
+  status: OrgStatus
   currency: string
   timezone: string
   locale: string
-  country: string
   tax_registration_number: string
   prices_include_tax: boolean
   contact_email: string
   contact_phone: string
-  address_line1: string
-  address_line2: string
-  city: string
-  state: string
-  postal_code: string
-  onboarding_status: string
+  address: string
 }
 
-export type BranchAccess = {
+export type OrganizationSummary = {
   id: string
-  code: string
   name: string
-  status: string
-  permissions: string[]
-}
-
-export type Entitlement = { enabled: boolean; limit: number | null }
-
-export type TenantContext = {
-  organization: Organization
+  slug: string
+  industry: string
+  status: OrgStatus
   branding: Branding
-  membership: { id: string; is_owner: boolean }
-  tenant_permissions: string[]
-  branches: BranchAccess[]
-  entitlements: Record<string, Entitlement>
 }
 
 export type Branch = {
   id: string
   code: string
   name: string
-  status: string
+  status: 'active' | 'inactive'
   timezone: string
   phone: string
   email: string
-  address_line1: string
-  city: string
-  state: string
-  postal_code: string
+  address: string
+}
+
+export type BranchInput = {
+  name: string
+  code: string
+  timezone: string
+  phone: string
+  email: string
+  address: string
+}
+
+export type PermissionGrant =
+  | { scope: 'tenant' }
+  | { scope: 'branches'; branch_ids: string[] }
+
+export type SubscriptionSummary = {
+  plan_code: string | null
+  plan_name: string
+  status: string | null
+  is_usable: boolean
+  features: string[]
+  max_branches: number | null
+  max_members: number | null
+  trial_ends_at: string | null
+}
+
+export type WorkspaceContext = {
+  organization: Organization
+  branding: Branding
+  subscription: SubscriptionSummary
+  permissions: Record<string, PermissionGrant>
+  branches: Branch[]
+}
+
+export type Me = {
+  id: string
+  email: string
+  full_name: string
+  platform_permissions: string[]
 }
 
 export type Member = {
   id: string
-  user: User
-  status: string
-  is_owner: boolean
-  joined_at: string
-  roles: { role_id: string; role_name: string; scope: string }[]
-  branches: { id: string; code: string; name: string }[]
-}
-
-export type Role = {
-  id: string
-  key: string
-  name: string
-  description: string
-  is_system: boolean
-  permission_codes: string[]
-  member_count: number
+  full_name: string
+  email: string
+  status: 'active' | 'deactivated'
+  branches: string[]
+  roles: string[]
 }
 
 export type Invitation = {
   id: string
   email: string
-  status: string
-  is_owner: boolean
+  role_name: string
+  status: 'pending' | 'accepted' | 'revoked'
   expires_at: string
+}
+
+export type Role = {
+  id: string
+  name: string
+  description: string
+  is_system: boolean
+  permissions: string[]
+}
+
+export type AuditEvent = {
+  id: string
   created_at: string
-  is_expired: boolean
+  action: string
+  actor_name: string
+  summary: string
 }
 
 export type PlatformTenant = {
   id: string
-  slug: string
   name: string
+  slug: string
   industry: string
-  status: string
-  onboarding_status: string
+  status: OrgStatus
+  plan_name: string
+  plan_code: string
+  subscription_status: string
+  branch_count: number
+  member_count: number
+  contact_email: string
+  legal_name: string
+}
+
+export type PlatformMetrics = {
+  total_brands: number
+  total_branches: number
+  total_active_members: number
+  active_subscriptions: number
+  tenants_by_status: Record<string, number>
+  subscriptions_by_status: Record<string, number>
+  tenants_by_plan: Record<string, number>
+}
+
+export type BrandOnboardInput = {
+  name: string
+  slug: string
+  industry: string
+  plan_code: string
+  owner_email: string
+  legal_name?: string
+  contact_email?: string
+  contact_phone?: string
+  currency?: string
+  timezone?: string
+  country?: string
+  locale?: string
+}
+
+export type BrandOnboardResult = {
+  tenant: PlatformTenant
+  owner_invitation_url: string
+  invitation_email_sent: boolean
+}
+
+export type ExpenseStatus = 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'paid'
+
+export type Expense = {
+  id: string
+  branch_id: string
+  branch_name: string
+  category_id: string
+  category_name: string
+  entry_type: 'recurring' | 'variable'
+  status: ExpenseStatus
+  amount: string
+  expense_date: string
+  billing_period: string
+  payment_method: string
+  description: string
+  receipt_url: string | null
+  submitted_by_email: string
+  submitted_by_name: string
+  submitted_at: string | null
+  approved_by_email: string
+  approved_at: string | null
+  rejected_at: string | null
+  rejection_reason: string
+  paid_at: string | null
+  payment_reference: string
   created_at: string
-  subscription: {
-    plan_code: string
-    plan_name: string
-    status: string
-    trial_ends_at: string | null
-  } | null
+}
+
+export type ExpenseCategory = {
+  id: string
+  code: string
+  name: string
+  is_active: boolean
+}
+
+export type RecurringExpense = {
+  id: string
+  branch_id: string
+  branch_name: string
+  category_id: string
+  category_name: string
+  expected_amount: string
+  frequency: string
+  start_date: string
+  end_date: string | null
+  due_day: number
+  description: string
+  is_active: boolean
+}
+
+export type ExpenseSummary = {
+  pending_approval: number
+  draft: number
+  approved: number
+  rejected: number
+  paid: number
+  total_pending_amount: string
+}
+
+export type ExpenseReportRow = {
+  branch_id: string
+  branch_name: string
+  status: string
+  count: number
+  total_amount: string
+}
+
+export type AppNotification = {
+  id: string
+  notification_type: string
+  title: string
+  body: string
+  link_path: string
+  expense_id: string | null
+  is_read: boolean
+  read_at: string | null
+  created_at: string
+}
+
+export type NotificationSettings = {
+  primary_email: string
+  extra_recipient_emails: string[]
+  reminder_intervals_hours: number[]
+  reminders_enabled: boolean
 }
 
 export type Plan = {
@@ -157,25 +256,16 @@ export type Plan = {
   code: string
   name: string
   description: string
-  is_active: boolean
   trial_days: number
-  tenant_count: number
+  max_branches: number | null
+  max_members: number | null
+  features: string[]
+  is_active: boolean
 }
 
-export type PlatformMetrics = {
-  tenants_by_status: Record<string, number>
-  subscriptions_by_status: Record<string, number>
-  tenants_by_plan: Record<string, number>
-  total_branches: number
-  total_active_members: number
-}
-
-export type AuditEvent = {
-  id: string
-  occurred_at: string
-  actor_email: string
-  action: string
-  target_type: string
-  target_id: string
-  metadata: Record<string, unknown>
+export type Page<T> = {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T[]
 }

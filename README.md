@@ -9,7 +9,7 @@ Multi-tenant ERP + POS SaaS. Phase 1 establishes identity, organizations, branch
 
 ## Repository layout
 
-- `backend/` — modular Django monolith (`apps.accounts`, `tenancy`, `branches`, `access_control`, `subscriptions`, `audit_logs`, `platform_admin`)
+- `backend/` — modular Django monolith (`apps.accounts`, `tenancy`, `branches`, `access_control`, `subscriptions`, `audit_logs`, `platform_admin`, `notifications`, `expenses`)
 - `frontend/` — React application
 
 ## Environment
@@ -48,7 +48,19 @@ python manage.py onboard_tenant --name Zaylan --slug zaylan --owner-email owner@
 python manage.py runserver
 ```
 
-`bootstrap_platform` prompts for a password unless `PLATFORM_ADMIN_PASSWORD` is set. The owner invitation link printed by `onboard_tenant` is single-use.
+`bootstrap_platform` prompts for a password unless `PLATFORM_ADMIN_PASSWORD` is set. It also refreshes system role permissions (including expenses). The Brand Admin invitation link printed by `onboard_tenant` is single-use and emailed when SMTP/console mail is configured.
+
+### Scheduled jobs (expenses)
+
+Run on a schedule (Task Scheduler / cron). Do not rely on an open browser session.
+
+```powershell
+python manage.py generate_recurring_expenses
+python manage.py send_expense_reminders
+python manage.py retry_failed_emails
+```
+
+Email uses `EMAIL_*` / `DEFAULT_FROM_EMAIL` from the environment (console backend by default). Receipt uploads use `MEDIA_ROOT`.
 
 Tests:
 
@@ -77,7 +89,8 @@ npm run build
 - Access tokens live in memory and are sent as `Authorization: Bearer`.
 - Refresh tokens are rotated HttpOnly cookies on `/api/v1/auth/`.
 - Tenant APIs require `X-Organization-ID`. The header selects context; membership is resolved on the server.
-- Platform administrators manage tenant lifecycle and plans. They do not receive tenant financial data.
+- Platform administrators manage brand (organization) lifecycle and plans. They do not receive brand expense detail from the platform console.
+- Brand Admins approve expenses. Branch users submit them. Self-approval is denied by default. Approval and payment are separate statuses.
 
 ## Verification
 
@@ -89,4 +102,4 @@ npm run build
 
 ## Later phases
 
-Phase 2 adds the unified catalog, recipes, and costing. POS, inventory, expenses, and finance reports are not in this phase.
+Phase 2 adds the unified catalog, recipes, and costing. POS and inventory modules remain planned.

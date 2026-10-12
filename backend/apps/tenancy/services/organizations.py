@@ -63,8 +63,11 @@ def onboard_organization(
     plan,
     owner_email: str,
     request=None,
+    legal_name: str = "",
+    contact_email: str = "",
+    contact_phone: str = "",
 ) -> tuple[Organization, str]:
-    """Create a tenant with system roles, branding, a subscription and an owner invitation."""
+    """Create a tenant (brand) with system roles, branding, a subscription and an owner invitation."""
     if Organization.objects.filter(slug=slug).exists():
         raise ConflictError("An organization with this slug already exists.")
     now = timezone.now()
@@ -76,6 +79,9 @@ def onboard_organization(
         timezone=timezone_name,
         country=country,
         locale=locale,
+        legal_name=legal_name or "",
+        contact_email=contact_email or owner_email,
+        contact_phone=contact_phone or "",
         status=OrganizationStatus.ACTIVE,
         onboarding_status=OnboardingStatus.IN_PROGRESS,
         activated_at=now,
@@ -83,6 +89,9 @@ def onboard_organization(
     organization.full_clean()
     organization.save()
     OrganizationBranding.objects.create(organization=organization, display_name=name)
+    from apps.notifications.services import ensure_brand_notification_settings
+
+    ensure_brand_notification_settings(organization)
     roles = sync_system_roles(organization)
     start_subscription(organization, plan)
     invitation, raw_token = create_invitation_record(

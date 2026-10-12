@@ -70,13 +70,26 @@ class TenantViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, PlatformVi
             locale=data["locale"],
             plan=data["plan_code"],
             owner_email=data["owner_email"],
+            legal_name=data.get("legal_name", ""),
+            contact_email=data.get("contact_email", ""),
+            contact_phone=data.get("contact_phone", ""),
             request=request,
+        )
+        invite_link = invitation_url(raw_token)
+        from apps.notifications.services import deliver_invitation
+
+        email_sent = deliver_invitation(
+            organization_name=organization.name,
+            email=data["owner_email"],
+            invite_url=invite_link,
+            is_owner=True,
         )
         organization = self.get_queryset().get(pk=organization.pk)
         return Response(
             {
                 "tenant": TenantSerializer(organization).data,
-                "owner_invitation_url": invitation_url(raw_token),
+                "owner_invitation_url": invite_link,
+                "invitation_email_sent": email_sent,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -213,15 +226,20 @@ class PlatformMetricsView(APIView):
         def counts(queryset, field):
             return {row[field]: row["n"] for row in queryset.values(field).annotate(n=Count("pk"))}
 
+        tenants_by_status = counts(Organization.objects.all(), "status")
+        subscriptions_by_status = counts(OrganizationSubscription.objects.all(), "status")
         return Response(
             {
-                "tenants_by_status": counts(Organization.objects.all(), "status"),
-                "subscriptions_by_status": counts(OrganizationSubscription.objects.all(), "status"),
+                "tenants_by_status": tenants_by_status,
+                "subscriptions_by_status": subscriptions_by_status,
                 "tenants_by_plan": counts(OrganizationSubscription.objects.all(), "plan__code"),
                 "total_branches": Branch.objects.count(),
                 "total_active_members": OrganizationMembership.objects.filter(
                     status=MembershipStatus.ACTIVE
                 ).count(),
+                "total_brands": Organization.objects.count(),
+                "active_subscriptions": subscriptions_by_status.get("ACTIVE", 0)
+                + subscriptions_by_status.get("TRIALING", 0),
             }
         )
 

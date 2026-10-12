@@ -20,6 +20,9 @@ class Command(BaseCommand):
         parser.add_argument("--timezone", default="Asia/Kolkata")
         parser.add_argument("--country", default="IN")
         parser.add_argument("--locale", default="en-IN")
+        parser.add_argument("--legal-name", default="")
+        parser.add_argument("--contact-email", default="")
+        parser.add_argument("--contact-phone", default="")
 
     def handle(self, *args, **opts):
         ensure_default_plans()
@@ -37,8 +40,21 @@ class Command(BaseCommand):
             locale=opts["locale"],
             plan=plan,
             owner_email=opts["owner_email"],
+            legal_name=opts["legal_name"],
+            contact_email=opts["contact_email"],
+            contact_phone=opts["contact_phone"],
+        )
+        invite_link = invitation_url(raw_token)
+        from apps.notifications.services import deliver_invitation
+
+        sent = deliver_invitation(
+            organization_name=organization.name,
+            email=opts["owner_email"],
+            invite_url=invite_link,
+            is_owner=True,
         )
         self.stdout.write(
-            self.style.SUCCESS(f"Onboarded {organization.name} ({organization.slug}).")
+            self.style.SUCCESS(f"Onboarded brand {organization.name} ({organization.slug}).")
         )
-        self.stdout.write(f"Owner invitation link (single use): {invitation_url(raw_token)}")
+        self.stdout.write(f"Brand Admin invitation link (single use): {invite_link}")
+        self.stdout.write(f"Invitation email sent: {sent}")

@@ -6,14 +6,16 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from apps.access_control.services import grant_platform_role, sync_permission_catalog
+from apps.access_control.services import grant_platform_role, sync_permission_catalog, sync_system_roles
 from apps.subscriptions.services import ensure_default_plans
+from apps.tenancy.models import Organization
 
 
 class Command(BaseCommand):
     help = (
-        "Sync permission/feature catalogs, create default plans, and optionally create a platform "
-        "super admin. The password is read from PLATFORM_ADMIN_PASSWORD or prompted."
+        "Sync permission/feature catalogs, refresh system roles for all brands, create default "
+        "plans, and optionally create a platform super admin. "
+        "The password is read from PLATFORM_ADMIN_PASSWORD or prompted."
     )
 
     def add_arguments(self, parser):
@@ -24,7 +26,9 @@ class Command(BaseCommand):
     def handle(self, *args, admin_email=None, admin_name="Platform Admin", **options):
         sync_permission_catalog()
         ensure_default_plans()
-        self.stdout.write(self.style.SUCCESS("Catalogs and default plans are ready."))
+        for organization in Organization.objects.all().iterator():
+            sync_system_roles(organization)
+        self.stdout.write(self.style.SUCCESS("Catalogs, system roles, and default plans are ready."))
         if not admin_email:
             return
 
