@@ -1,0 +1,44 @@
+:root {
+  --z-cream: #f3e7d6;
+  --z-burgundy: #6b2e2e;
+  --z-tan: #b58a5a;
+  --z-ink: #171717;
+  --z-surface: #fffbf5;
+  --z-surface-muted: #f7eddf;
+  --z-border: #e2d3bf;
+  --z-burgundy-soft: #8a4a4a;
+  --z-success: #1f6b3a;
+  --z-warning: #8a5a12;
+  --z-danger: #9b1c1c;
+  --z-info: #1e4b73;
+  --z-radius: 0.75rem;
+  --z-shadow: 0 1px 2px rgb(23 23 23 / 0.06), 0 8px 24px rgb(107 46 46 / 0.06);
+  --font-sans: "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-ui: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+}
+
+[data-theme] {
+  --z-cream: var(--tenant-background, var(--z-cream));
+  --z-burgundy: var(--tenant-primary, var(--z-burgundy));
+  --z-tan: var(--tenant-secondary, var(--z-tan));
+  --z-ink: var(--tenant-text, var(--z-ink));
+  --z-surface: var(--tenant-surface, var(--z-surface));
+}
+
+@theme inline {
+  --color-cream: var(--z-cream);
+  --color-burgundy: var(--z-burgundy);
+  --color-tan: var(--z-tan);
+  --color-ink: var(--z-ink);
+  --color-surface: var(--z-surface);
+  --color-surface-muted: var(--z-surface-muted);
+  --color-line: var(--z-border);
+  --color-success: var(--z-success);
+  --color-warning: var(--z-warning);
+  --color-danger: var(--z-danger);
+  --color-info: var(--z-info);
+  --radius-card: var(--z-radius);
+  --shadow-card: var(--z-shadow);
+  --font-sans: var(--font-ui);
+  --font-display: var(--font-sans);
+}
