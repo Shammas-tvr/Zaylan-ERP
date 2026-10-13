@@ -234,6 +234,70 @@ def change_organization_status(
 
 
 @transaction.atomic
+def update_platform_brand(
+    *,
+    actor,
+    organization: Organization,
+    data: dict,
+    request=None,
+) -> Organization:
+    """Super Admin edit of brand profile fields (name, slug, industry, contact)."""
+    organization = Organization.objects.select_for_update().get(pk=organization.pk)
+    changed = {}
+    for field in ("name", "legal_name", "industry", "contact_phone"):
+        if field not in data:
+            continue
+        value = data[field]
+        if getattr(organization, field) != value:
+            changed[field] = [getattr(organization, field), value]
+            setattr(organization, field, value)
+    if "owner_email" in data and data["owner_email"]:
+        owner_email = normalize_email(data["owner_email"])
+        membership = (
+            organization.memberships.filter(is_owner=True)
+            .select_related("user")
+            .first()
+        )
+        if membership is None:
+            raise ConflictError("This brand has no Brand Admin to update.")
+        owner = membership.user
+        if owner.email != owner_email:
+            User = get_user_model()
+            if User.objects.filter(email__iexact=owner_email).exclude(pk=owner.pk).exists():
+                raise ConflictError("This email is already used. Brand Admin email must be unique.")
+            if (
+                Organization.objects.filter(contact_email__iexact=owner_email)
+                .exclude(pk=organization.pk)
+                .exists()
+            ):
+                raise ConflictError("This email is already linked to another brand.")
+            changed["owner_email"] = [owner.email, owner_email]
+            owner.email = owner_email
+            owner.save(update_fields=["email"])
+            organization.contact_email = owner_email
+    if "slug" in data and data["slug"] and data["slug"] != organization.slug:
+        new_slug = data["slug"].strip().lower()
+        if Organization.objects.filter(slug=new_slug).exclude(pk=organization.pk).exists():
+            raise ConflictError("A brand with this slug already exists.")
+        changed["slug"] = [organization.slug, new_slug]
+        organization.slug = new_slug
+        organization.portal_url = build_portal_url(new_slug)
+        changed["portal_url"] = organization.portal_url
+    if changed:
+        organization.full_clean()
+        organization.save()
+        record_event(
+            action="platform.tenant_updated",
+            actor=actor,
+            organization=organization,
+            target=organization,
+            metadata=changed,
+            request=request,
+        )
+    return organization
+
+
+@transaction.atomic
 def update_organization_settings(ctx, data: dict, *, request=None) -> Organization:
     organization = Organization.objects.select_for_update().get(pk=ctx.organization.pk)
     changed = {}

@@ -6,12 +6,14 @@ export function DataTable<T>({
   rows,
   rowKey,
   empty,
+  onRowClick,
 }: {
   caption: string
   columns: Array<{ header: string; render: (row: T) => ReactNode; className?: string }>
   rows: T[]
   rowKey: (row: T) => string
   empty: string
+  onRowClick?: (row: T) => void
 }) {
   return (
     <div className="overflow-x-auto">
@@ -35,7 +37,11 @@ export function DataTable<T>({
             </tr>
           ) : (
             rows.map((row) => (
-              <tr key={rowKey(row)} className="align-top">
+              <tr
+                key={rowKey(row)}
+                className={onRowClick ? 'cursor-pointer align-top hover:bg-cream' : 'align-top'}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+              >
                 {columns.map((column) => (
                   <td key={column.header} className={`border-b border-line/80 px-3 py-3.5 ${column.className ?? ''}`}>
                     {column.render(row)}

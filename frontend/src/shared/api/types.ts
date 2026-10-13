@@ -132,6 +132,7 @@ export type PlatformTenant = {
   branch_count: number
   member_count: number
   contact_email: string
+  contact_phone: string
   legal_name: string
   portal_url: string
 }

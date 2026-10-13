@@ -15,6 +15,7 @@ import { ExpenseReportsPage } from '../features/expenses/ReportsPage.tsx'
 import { OverviewPage } from '../features/overview/OverviewPage.tsx'
 import { PeoplePage } from '../features/people/PeoplePage.tsx'
 import { PlansPage } from '../features/platform/PlansPage.tsx'
+import { BrandDetailPage } from '../features/platform/BrandDetailPage.tsx'
 import { TenantsPage } from '../features/platform/TenantsPage.tsx'
 import { SettingsPage } from '../features/settings/SettingsPage.tsx'
 import { RequireSession, SessionGate } from './SessionGate.tsx'
@@ -47,6 +48,7 @@ const router = createBrowserRouter([
               { path: 'people', element: <PeoplePage /> },
               { path: 'settings', element: <SettingsPage /> },
               { path: 'audit', element: <AuditPage /> },
+              { path: 'platform/brands/:brandId', element: <BrandDetailPage /> },
               { path: 'platform/brands', element: <TenantsPage /> },
               { path: 'platform/tenants', element: <Navigate to="/platform/brands" replace /> },
               { path: 'platform/plans', element: <PlansPage /> },

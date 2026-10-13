@@ -16,7 +16,11 @@ from apps.branches.models import Branch
 from apps.subscriptions.models import Feature, OrganizationSubscription, Plan, PlanEntitlement
 from apps.subscriptions.services import change_subscription
 from apps.tenancy.models import MembershipStatus, Organization, OrganizationMembership
-from apps.tenancy.services.organizations import change_organization_status, onboard_organization
+from apps.tenancy.services.organizations import (
+    change_organization_status,
+    onboard_organization,
+    update_platform_brand,
+)
 
 from .serializers import (
     FeatureSerializer,
@@ -29,6 +33,7 @@ from .serializers import (
     TenantSerializer,
     TenantStatusSerializer,
     TenantSubscriptionUpdateSerializer,
+    TenantUpdateSerializer,
 )
 
 
@@ -43,9 +48,11 @@ class TenantViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, PlatformVi
         "list": "platform.tenants.view",
         "retrieve": "platform.tenants.view",
         "create": "platform.tenants.manage",
+        "partial_update": "platform.tenants.manage",
         "set_status": "platform.tenants.manage",
         "set_subscription": "platform.tenants.manage",
     }
+    http_method_names = ["get", "post", "patch", "head", "options"]
     search_fields = ("name", "slug")
     filterset_fields = ("status", "industry", "onboarding_status")
     ordering_fields = ("name", "created_at")
@@ -85,6 +92,27 @@ class TenantViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, PlatformVi
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @extend_schema(request=TenantUpdateSerializer, responses=TenantDetailSerializer)
+    def partial_update(self, request, pk=None):
+        serializer = TenantUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        plan = data.pop("plan_code", None)
+        organization = update_platform_brand(
+            actor=request.user,
+            organization=self.get_object(),
+            data=data,
+            request=request,
+        )
+        if plan is not None and getattr(organization, "subscription", None) is not None:
+            change_subscription(
+                actor=request.user,
+                subscription=organization.subscription,
+                plan=plan,
+                request=request,
+            )
+        return Response(TenantDetailSerializer(self.get_queryset().get(pk=organization.pk)).data)
 
     @extend_schema(request=TenantStatusSerializer, responses=TenantDetailSerializer)
     @action(detail=True, methods=["post"], url_path="status")

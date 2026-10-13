@@ -441,6 +441,7 @@ function mapPlatformTenant(row: Record<string, unknown>): PlatformTenant {
     branch_count: Number(usage.branches ?? 0),
     member_count: Number(usage.members ?? 0),
     contact_email: String(row.contact_email ?? ''),
+    contact_phone: String(row.contact_phone ?? ''),
     legal_name: String(row.legal_name ?? ''),
     portal_url: String(row.portal_url ?? ''),
   }
@@ -484,6 +485,7 @@ export async function createBrand(input: BrandOnboardInput): Promise<BrandOnboar
       branch_count: 0,
       member_count: 0,
       contact_email: input.owner_email,
+      contact_phone: input.contact_phone ?? '',
       legal_name: input.legal_name ?? '',
       portal_url: `${window.location.origin}/b/${slug}`,
     }
@@ -518,6 +520,42 @@ export async function createBrand(input: BrandOnboardInput): Promise<BrandOnboar
     brand_admin_email: data.brand_admin_email,
     portal_url: data.portal_url,
   }
+}
+
+export type BrandUpdateInput = {
+  name: string
+  slug: string
+  industry: string
+  legal_name: string
+  contact_phone: string
+  owner_email: string
+  plan_code: string
+}
+
+export async function updateBrand(id: string, input: BrandUpdateInput): Promise<PlatformTenant> {
+  if (isPreview()) {
+    const tenant = readPreview().tenants.find((item) => item.id === id)
+    if (!tenant) throw new Error('Brand not found.')
+    tenant.name = input.name
+    tenant.slug = input.slug
+    tenant.industry = input.industry
+    tenant.legal_name = input.legal_name
+    tenant.contact_phone = input.contact_phone
+    tenant.contact_email = input.owner_email
+    tenant.plan_code = input.plan_code
+    tenant.portal_url = `${window.location.origin}/b/${input.slug}`
+    return tenant
+  }
+  const { data } = await client.patch<Record<string, unknown>>(`/platform/tenants/${id}`, {
+    name: input.name.trim(),
+    slug: input.slug.trim(),
+    industry: input.industry.trim().toUpperCase().replace(/-/g, '_'),
+    legal_name: input.legal_name.trim(),
+    contact_phone: input.contact_phone.trim(),
+    owner_email: input.owner_email.trim(),
+    plan_code: input.plan_code,
+  })
+  return mapPlatformTenant(data)
 }
 
 export async function getTenant(id: string): Promise<PlatformTenant> {

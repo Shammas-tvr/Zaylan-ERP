@@ -1,17 +1,16 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   useCreateBrand,
   useMe,
   usePlans,
   usePlatformMetrics,
-  useSetTenantStatus,
-  useSetTenantSubscription,
   useTenants,
 } from '../workspace/queries.ts'
-import type { BrandOnboardInput, OrgStatus, PlatformTenant } from '../../shared/api/types.ts'
+import type { BrandOnboardInput } from '../../shared/api/types.ts'
 import { errorMessage } from '../../shared/api/errors.ts'
 import { usePageTitle } from '../../shared/hooks.ts'
-import { industryLabel, labelOf } from '../../shared/labels.ts'
+import { industryLabel } from '../../shared/labels.ts'
 import { canPlatform } from '../../shared/permissions.ts'
 import { Button } from '../../shared/ui/Button.tsx'
 import { DataTable } from '../../shared/ui/DataTable.tsx'
@@ -19,22 +18,6 @@ import { PasswordField, SelectField, TextField } from '../../shared/ui/Field.tsx
 import { ErrorState, NoAccess, PageSkeleton } from '../../shared/ui/Feedback.tsx'
 import { Modal } from '../../shared/ui/Modal.tsx'
 import { PageHeader, Panel, StatusBadge } from '../../shared/ui/PageHeader.tsx'
-
-const transitions: Record<OrgStatus, Array<{ status: OrgStatus; label: string }>> = {
-  pending: [
-    { status: 'active', label: 'Activate' },
-    { status: 'deactivated', label: 'Deactivate' },
-  ],
-  active: [
-    { status: 'suspended', label: 'Suspend' },
-    { status: 'deactivated', label: 'Deactivate' },
-  ],
-  suspended: [
-    { status: 'active', label: 'Activate' },
-    { status: 'deactivated', label: 'Deactivate' },
-  ],
-  deactivated: [{ status: 'active', label: 'Activate' }],
-}
 
 const emptyForm: BrandOnboardInput = {
   name: '',
@@ -72,20 +55,16 @@ function sanitizeSlug(value: string) {
 
 export function TenantsPage() {
   usePageTitle('Brands')
+  const navigate = useNavigate()
   const me = useMe()
   const tenants = useTenants()
   const metrics = usePlatformMetrics()
   const plans = usePlans()
-  const update = useSetTenantStatus()
   const createBrand = useCreateBrand()
-  const setSubscription = useSetTenantSubscription()
-  const [pending, setPending] = useState<{ tenant: PlatformTenant; status: OrgStatus; label: string } | null>(null)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState<BrandOnboardInput>(emptyForm)
   const [slugManual, setSlugManual] = useState(false)
   const [createdNotice, setCreatedNotice] = useState<{ name: string; email: string; portalUrl: string } | null>(null)
-  const [detail, setDetail] = useState<PlatformTenant | null>(null)
-  const [planCode, setPlanCode] = useState('')
 
   const allowed = canPlatform(me.data?.platform_permissions, 'platform.tenants.view')
   const canManage = canPlatform(me.data?.platform_permissions, 'platform.tenants.manage')
@@ -142,46 +121,13 @@ export function TenantsPage() {
           rows={rows}
           rowKey={(tenant) => tenant.id}
           empty="No brands yet."
+          onRowClick={(tenant) => navigate(`/platform/brands/${tenant.id}`)}
           columns={[
-            {
-              header: 'Brand',
-              render: (tenant) => (
-                <button
-                  type="button"
-                  className="text-left font-medium underline-offset-2 hover:underline"
-                  onClick={() => {
-                    setDetail(tenant)
-                    setPlanCode(tenant.plan_code)
-                  }}
-                >
-                  {tenant.name}
-                </button>
-              ),
-            },
+            { header: 'Brand', render: (tenant) => <span className="font-medium">{tenant.name}</span> },
             { header: 'Slug', render: (tenant) => tenant.slug },
             { header: 'Plan', render: (tenant) => tenant.plan_name },
             { header: 'Branches', render: (tenant) => String(tenant.branch_count) },
             { header: 'Status', render: (tenant) => <StatusBadge status={tenant.status} /> },
-            {
-              header: 'Action',
-              render: (tenant) =>
-                canManage ? (
-                  <div className="flex flex-wrap gap-2">
-                    {transitions[tenant.status].map((action) => (
-                      <Button
-                        key={action.status}
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => setPending({ tenant, ...action })}
-                      >
-                        {action.label}
-                      </Button>
-                    ))}
-                  </div>
-                ) : (
-                  '—'
-                ),
-            },
           ]}
         />
       </Panel>
@@ -314,98 +260,6 @@ export function TenantsPage() {
         </div>
       </Modal>
 
-      <Modal open={Boolean(pending)} title={pending ? `${pending.label} ${pending.tenant.name}` : ''} onClose={() => setPending(null)}>
-        <p className="text-ink-soft">
-          {pending?.status === 'suspended'
-            ? 'People in this brand will be unable to open it until it is activated again.'
-            : 'This change is written to the platform audit log.'}
-        </p>
-        {update.isError ? <p className="mt-3 text-sm text-danger">{errorMessage(update.error)}</p> : null}
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setPending(null)}>
-            Cancel
-          </Button>
-          <Button
-            variant={pending?.status === 'active' ? 'primary' : 'danger'}
-            disabled={update.isPending}
-            onClick={() => {
-              if (!pending) return
-              update.mutate({ id: pending.tenant.id, status: pending.status }, { onSuccess: () => setPending(null) })
-            }}
-          >
-            {pending?.label}
-          </Button>
-        </div>
-      </Modal>
-
-      <Modal open={Boolean(detail)} title={detail?.name ?? 'Brand'} onClose={() => setDetail(null)}>
-        {detail ? (
-          <div className="grid gap-3 text-sm">
-            <p>
-              <span className="text-ink-soft">Legal name:</span> {detail.legal_name || '—'}
-            </p>
-            <p>
-              <span className="text-ink-soft">Slug:</span> {detail.slug}
-            </p>
-            <p>
-              <span className="text-ink-soft">Industry:</span> {labelOf(industryLabel, detail.industry)}
-            </p>
-            <p>
-              <span className="text-ink-soft">Brand Admin email:</span> {detail.contact_email || '—'}
-            </p>
-            <p>
-              <span className="text-ink-soft">Portal URL:</span>{' '}
-              {detail.portal_url ? (
-                <a className="break-all underline" href={detail.portal_url} target="_blank" rel="noreferrer">
-                  {detail.portal_url}
-                </a>
-              ) : (
-                '—'
-              )}
-            </p>
-            <p>
-              <span className="text-ink-soft">Subscription:</span> {detail.plan_name} (
-              {detail.subscription_status || '—'})
-            </p>
-            <p>
-              <span className="text-ink-soft">Branches / members:</span> {detail.branch_count} / {detail.member_count}
-            </p>
-            {canManage ? (
-              <form
-                className="mt-2 grid gap-3"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  setSubscription.mutate(
-                    { id: detail.id, plan_code: planCode },
-                    { onSuccess: () => setDetail(null) },
-                  )
-                }}
-              >
-                <SelectField label="Change plan" value={planCode} onChange={(e) => setPlanCode(e.target.value)}>
-                  {(plans.data ?? []).map((plan) => (
-                    <option key={plan.code} value={plan.code}>
-                      {plan.name}
-                    </option>
-                  ))}
-                </SelectField>
-                {setSubscription.isError ? <p className="text-danger">{errorMessage(setSubscription.error)}</p> : null}
-                <div className="flex justify-end gap-2">
-                  <Button type="button" variant="secondary" onClick={() => setDetail(null)}>
-                    Close
-                  </Button>
-                  <Button type="submit" disabled={setSubscription.isPending}>
-                    Save plan
-                  </Button>
-                </div>
-              </form>
-            ) : (
-              <div className="mt-3 flex justify-end">
-                <Button onClick={() => setDetail(null)}>Close</Button>
-              </div>
-            )}
-          </div>
-        ) : null}
-      </Modal>
     </div>
   )
 }

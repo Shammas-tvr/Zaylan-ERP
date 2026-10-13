@@ -92,6 +92,25 @@ class TenantOnboardedSerializer(serializers.Serializer):
     portal_url = serializers.URLField()
 
 
+class TenantUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=150, required=False)
+    slug = serializers.SlugField(max_length=63, min_length=3, required=False)
+    legal_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    industry = serializers.ChoiceField(choices=Industry.choices, required=False)
+    contact_phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    owner_email = serializers.EmailField(max_length=254, required=False)
+    plan_code = serializers.SlugField(required=False)
+
+    def validate_owner_email(self, value: str) -> str:
+        return normalize_email(value)
+
+    def validate_plan_code(self, value: str) -> Plan:
+        plan = Plan.objects.filter(code=value).first()
+        if plan is None:
+            raise serializers.ValidationError("Unknown plan.")
+        return plan
+
+
 class TenantStatusSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=OrganizationStatus.choices)
     reason = serializers.CharField(max_length=500)

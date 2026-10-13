@@ -37,6 +37,8 @@ import {
   sendInvitation,
   setTenantStatus,
   setTenantSubscription,
+  updateBrand,
+  getTenant,
   submitExpense,
   updateBranding,
   updateNotificationSettings,
@@ -134,6 +136,27 @@ export function useAudit(search: string, enabled = true) {
 
 export function useTenants() {
   return useQuery({ queryKey: ['platform', 'tenants'], queryFn: listTenants })
+}
+
+export function useTenant(id: string) {
+  return useQuery({
+    queryKey: ['platform', 'tenants', id],
+    queryFn: () => getTenant(id),
+    enabled: Boolean(id),
+  })
+}
+
+export function useUpdateBrand() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Parameters<typeof updateBrand>[1] }) =>
+      updateBrand(id, input),
+    onSuccess: async (_data, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ['platform', 'tenants'] })
+      await queryClient.invalidateQueries({ queryKey: ['platform', 'tenants', variables.id] })
+      await queryClient.invalidateQueries({ queryKey: ['platform', 'metrics'] })
+    },
+  })
 }
 
 export function usePlans() {
