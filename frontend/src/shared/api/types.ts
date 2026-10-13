@@ -82,6 +82,7 @@ export type WorkspaceContext = {
 export type Me = {
   id: string
   email: string
+  username?: string | null
   full_name: string
   platform_permissions: string[]
 }
@@ -132,6 +133,7 @@ export type PlatformTenant = {
   member_count: number
   contact_email: string
   legal_name: string
+  portal_url: string
 }
 
 export type PlatformMetrics = {
@@ -150,8 +152,9 @@ export type BrandOnboardInput = {
   industry: string
   plan_code: string
   owner_email: string
+  owner_password: string
+  owner_full_name?: string
   legal_name?: string
-  contact_email?: string
   contact_phone?: string
   currency?: string
   timezone?: string
@@ -161,8 +164,8 @@ export type BrandOnboardInput = {
 
 export type BrandOnboardResult = {
   tenant: PlatformTenant
-  owner_invitation_url: string
-  invitation_email_sent: boolean
+  brand_admin_email: string
+  portal_url: string
 }
 
 export type ExpenseStatus = 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'paid'

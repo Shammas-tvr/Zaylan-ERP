@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { logout } from '../shared/api/workspace.ts'
 import { queryClient } from '../shared/api/queryClient.ts'
 import { brandVars, defaultBranding } from '../shared/brand.ts'
@@ -27,9 +27,14 @@ export function WorkspaceLayout() {
   const workspace = useWorkspace()
   const me = useMe()
   const navigate = useNavigate()
+  const location = useLocation()
   const [navOpen, setNavOpen] = useState(false)
-  const [previewNote, setPreviewNote] = useState(session.preview)
   const desktopNav = useDesktopNav()
+  const isPlatformRoute = location.pathname.startsWith('/platform')
+  const hasPlatformAccess = platformNav.some((item) =>
+    canPlatform(me.data?.platform_permissions, item.permission),
+  )
+  const hasOrganization = Boolean(session.organizationId)
 
   useEffect(() => {
     if (!session.organizationId && organizations.data && organizations.data.length > 0) {
@@ -43,75 +48,62 @@ export function WorkspaceLayout() {
   const branches = workspace.data?.branches ?? []
 
   async function signOut() {
+    const goSuperAdmin = hasPlatformAccess && !hasOrganization
     await logout()
     queryClient.clear()
-    navigate('/login')
+    navigate(goSuperAdmin ? '/superadmin/login' : '/login')
   }
 
   return (
     <div style={brandVars(branding)} className="min-h-svh bg-[var(--brand-background)] text-[var(--brand-text)]">
-      <div className="mx-auto flex min-h-svh max-w-[1440px]">
+      <div className="flex min-h-svh w-full">
         {navOpen ? (
           <button className="fixed inset-0 z-30 bg-ink/30 lg:hidden" aria-label="Close navigation" onClick={() => setNavOpen(false)} />
         ) : null}
         <aside
           inert={!desktopNav && !navOpen}
           className={cn(
-            'fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-line bg-[var(--brand-surface)] px-4 py-5 transition-transform lg:static lg:translate-x-0',
-            navOpen ? 'translate-x-0' : '-translate-x-full',
+            'fixed inset-y-0 left-0 z-40 flex h-dvh max-h-dvh w-56 shrink-0 flex-col overflow-hidden border-r border-line bg-[var(--brand-surface)] px-3 py-4 transition-transform lg:static lg:h-auto lg:max-h-none',
+            navOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
           )}
         >
-          <Wordmark />
-          <span className="mt-4 h-0.5 w-10 bg-[var(--brand-secondary)]" />
-          <label className="mt-6 grid gap-1.5 text-sm">
-            <span className="text-ink-soft">Organization</span>
-            <select
-              className="h-11 rounded-xl border border-line bg-cream px-3"
-              value={session.organizationId ?? ''}
-              onChange={(event) => {
-                selectOrganization(event.target.value)
-                setNavOpen(false)
-              }}
-            >
-              {(organizations.data ?? []).map((organization) => (
-                <option key={organization.id} value={organization.id}>
-                  {organization.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <nav className="mt-6 grid gap-1" aria-label="Workspace">
-            {workspaceNav
-              .filter((item) => item.permission === null || can(permissions, item.permission))
-              .map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  onClick={() => setNavOpen(false)}
-                  className={({ isActive }) =>
-                    cn(
-                      'rounded-xl border-l-2 px-3 py-2.5 text-sm',
-                      isActive
-                        ? 'border-[var(--brand-primary)] bg-cream font-medium text-[var(--brand-primary)]'
-                        : 'border-transparent text-ink hover:bg-cream',
-                    )
-                  }
+          <div className="shrink-0">
+            <Wordmark />
+            <span className="mt-4 block h-0.5 w-10 bg-[var(--brand-secondary)]" />
+            {hasOrganization ? (
+              <label className="mt-6 grid gap-1.5 text-sm">
+                <span className="text-ink-soft">Brand</span>
+                <select
+                  className="h-11 rounded-xl border border-line bg-cream px-3"
+                  value={session.organizationId ?? ''}
+                  onChange={(event) => {
+                    selectOrganization(event.target.value)
+                    setNavOpen(false)
+                  }}
                 >
-                  {item.label}
-                </NavLink>
-              ))}
-          </nav>
-          {platformNav.some((item) => canPlatform(me.data?.platform_permissions, item.permission)) ? (
-            <div className="mt-6">
-              <p className="px-3 text-xs font-medium tracking-wide text-ink-soft">Platform</p>
-              <nav className="mt-2 grid gap-1" aria-label="Platform">
-                {platformNav
-                  .filter((item) => canPlatform(me.data?.platform_permissions, item.permission))
+                  {(organizations.data ?? []).map((organization) => (
+                    <option key={organization.id} value={organization.id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <p className="mt-6 px-1 text-sm text-ink-soft">
+                {hasPlatformAccess ? 'Platform administration' : 'No brand selected'}
+              </p>
+            )}
+          </div>
+          <div className="mt-6 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+            {hasOrganization ? (
+              <nav className="grid gap-1" aria-label="Workspace">
+                {workspaceNav
+                  .filter((item) => item.permission === null || can(permissions, item.permission))
                   .map((item) => (
                     <NavLink
                       key={item.to}
                       to={item.to}
+                      end={item.end}
                       onClick={() => setNavOpen(false)}
                       className={({ isActive }) =>
                         cn(
@@ -126,9 +118,35 @@ export function WorkspaceLayout() {
                     </NavLink>
                   ))}
               </nav>
-            </div>
-          ) : null}
-          <div className="mt-auto border-t border-line pt-4">
+            ) : null}
+            {hasPlatformAccess ? (
+              <div className={hasOrganization ? 'mt-6' : ''}>
+                <p className="px-3 text-xs font-medium tracking-wide text-ink-soft">Platform</p>
+                <nav className="mt-2 grid gap-1" aria-label="Platform">
+                  {platformNav
+                    .filter((item) => canPlatform(me.data?.platform_permissions, item.permission))
+                    .map((item) => (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        onClick={() => setNavOpen(false)}
+                        className={({ isActive }) =>
+                          cn(
+                            'rounded-xl border-l-2 px-3 py-2.5 text-sm',
+                            isActive
+                              ? 'border-[var(--brand-primary)] bg-cream font-medium text-[var(--brand-primary)]'
+                              : 'border-transparent text-ink hover:bg-cream',
+                          )
+                        }
+                      >
+                        {item.label}
+                      </NavLink>
+                    ))}
+                </nav>
+              </div>
+            ) : null}
+          </div>
+          <div className="mt-4 shrink-0 border-t border-line pt-4">
             <p className="truncate text-sm font-medium">{me.data?.full_name}</p>
             <p className="truncate text-sm text-ink-soft">{me.data?.email}</p>
             <button type="button" className="mt-3 text-sm font-medium text-[var(--brand-primary)]" onClick={() => void signOut()}>
@@ -140,43 +158,43 @@ export function WorkspaceLayout() {
           <header className="flex items-center gap-3 border-b border-line/80 px-4 py-3 sm:px-8">
             <MenuButton open={navOpen} onClick={() => setNavOpen(true)} />
             <p className="hidden text-sm text-ink-soft sm:block">
-              {summary ? labelOf(industryLabel, summary.industry) : 'Workspace'}
+              {summary
+                ? labelOf(industryLabel, summary.industry)
+                : hasPlatformAccess
+                  ? 'Platform'
+                  : 'Workspace'}
             </p>
             <div className="ml-auto flex items-center gap-3">
-              {session.organizationId ? <NotificationBell /> : null}
-              <label className="grid">
-                <span className="sr-only">Branch</span>
-                <select
-                  className="h-11 rounded-xl border border-line bg-[var(--brand-surface)] px-3 text-sm"
-                  value={session.branchId ?? ''}
-                  onChange={(event) => selectBranch(event.target.value || null)}
-                >
-                  <option value="">All branches</option>
-                  {branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {hasOrganization ? <NotificationBell /> : null}
+              {hasOrganization ? (
+                <label className="grid">
+                  <span className="sr-only">Branch</span>
+                  <select
+                    className="h-11 rounded-xl border border-line bg-[var(--brand-surface)] px-3 text-sm"
+                    value={session.branchId ?? ''}
+                    onChange={(event) => selectBranch(event.target.value || null)}
+                  >
+                    <option value="">All branches</option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
             </div>
           </header>
           <main className="flex-1 px-4 py-6 sm:px-8 sm:py-8">
             <div className="mx-auto grid max-w-6xl gap-6">
-              {previewNote ? (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-[var(--brand-surface)] px-4 py-3 text-sm">
-                  <p>Sample workspace. Changes here stay in this browser and are not saved to a business.</p>
-                  <button type="button" className="font-medium text-[var(--brand-primary)]" onClick={() => setPreviewNote(false)}>
-                    Hide
-                  </button>
-                </div>
-              ) : null}
               <WorkspaceBody
-                isLoading={workspace.isLoading || organizations.isLoading}
-                isError={workspace.isError}
+                isLoading={organizations.isLoading || me.isLoading || (hasOrganization && workspace.isLoading)}
+                isError={hasOrganization && workspace.isError}
                 error={workspace.error}
                 onRetry={() => void workspace.refetch()}
-                hasOrganization={Boolean(session.organizationId)}
+                hasOrganization={hasOrganization}
+                isPlatformRoute={isPlatformRoute}
+                hasPlatformAccess={hasPlatformAccess}
               />
             </div>
           </main>
@@ -273,23 +291,40 @@ function WorkspaceBody({
   error,
   onRetry,
   hasOrganization,
+  isPlatformRoute,
+  hasPlatformAccess,
 }: {
   isLoading: boolean
   isError: boolean
   error: unknown
   onRetry: () => void
   hasOrganization: boolean
+  isPlatformRoute: boolean
+  hasPlatformAccess: boolean
 }) {
-  if (!hasOrganization && isLoading) return <PageSkeleton />
+  if (isLoading) return <PageSkeleton />
+  // Super Admin / platform users can open Brands & Plans without belonging to a brand.
+  if (isPlatformRoute && hasPlatformAccess) return <Outlet />
   if (!hasOrganization) {
     return (
       <section className="rounded-3xl border border-line bg-[var(--brand-surface)] p-6">
-        <h1 className="font-display text-3xl">No organization yet</h1>
-        <p className="mt-2 text-ink-soft">Accept an invitation to join a business, or ask a platform administrator to create one.</p>
+        <h1 className="font-display text-3xl">No brand yet</h1>
+        <p className="mt-2 text-ink-soft">
+          {hasPlatformAccess
+            ? 'Create the first brand from Platform → Brands, then invite its Brand Admin.'
+            : 'Accept an invitation to join a brand, or ask a platform administrator to create one.'}
+        </p>
+        {hasPlatformAccess ? (
+          <Link
+            to="/platform/brands"
+            className="mt-4 inline-block text-sm font-medium text-[var(--brand-primary)] underline-offset-2 hover:underline"
+          >
+            Open Brands
+          </Link>
+        ) : null}
       </section>
     )
   }
-  if (isLoading) return <PageSkeleton />
   if (isError) return <ErrorState error={error} onRetry={onRetry} />
   return <Outlet />
 }

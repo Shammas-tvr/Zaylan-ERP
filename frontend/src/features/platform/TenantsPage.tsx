@@ -15,7 +15,7 @@ import { industryLabel, labelOf } from '../../shared/labels.ts'
 import { canPlatform } from '../../shared/permissions.ts'
 import { Button } from '../../shared/ui/Button.tsx'
 import { DataTable } from '../../shared/ui/DataTable.tsx'
-import { SelectField, TextField } from '../../shared/ui/Field.tsx'
+import { PasswordField, SelectField, TextField } from '../../shared/ui/Field.tsx'
 import { ErrorState, NoAccess, PageSkeleton } from '../../shared/ui/Feedback.tsx'
 import { Modal } from '../../shared/ui/Modal.tsx'
 import { PageHeader, Panel, StatusBadge } from '../../shared/ui/PageHeader.tsx'
@@ -42,9 +42,32 @@ const emptyForm: BrandOnboardInput = {
   industry: 'other',
   plan_code: 'growth',
   owner_email: '',
+  owner_password: '',
+  owner_full_name: '',
   legal_name: '',
-  contact_email: '',
   contact_phone: '',
+}
+
+/** Auto slug: first + last word (Bariq Mens Fashions → bariq-fashions). */
+function shortSlugFromName(name: string) {
+  const words = name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+  if (words.length === 0) return ''
+  let slug = words.length === 1 ? words[0] : `${words[0]}-${words[words.length - 1]}`
+  if (slug.length < 3) slug = (slug + '-brand').slice(0, 63)
+  return slug.slice(0, 63)
+}
+
+/** Manual slug field: allow dashes and alphanumerics only. */
+function sanitizeSlug(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 63)
 }
 
 export function TenantsPage() {
@@ -59,7 +82,8 @@ export function TenantsPage() {
   const [pending, setPending] = useState<{ tenant: PlatformTenant; status: OrgStatus; label: string } | null>(null)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState<BrandOnboardInput>(emptyForm)
-  const [inviteResult, setInviteResult] = useState<{ url: string; emailSent: boolean; name: string } | null>(null)
+  const [slugManual, setSlugManual] = useState(false)
+  const [createdNotice, setCreatedNotice] = useState<{ name: string; email: string; portalUrl: string } | null>(null)
   const [detail, setDetail] = useState<PlatformTenant | null>(null)
   const [planCode, setPlanCode] = useState('')
 
@@ -78,11 +102,12 @@ export function TenantsPage() {
     <div className="grid gap-6">
       <PageHeader
         title="Brands"
-        description="Create customer brands, invite Brand Admins, and manage subscriptions. Platform admins do not see brand expense details here."
+        description="Create brands and Brand Admin accounts. Platform admins do not see brand expense details here."
         action={
           canManage ? (
             <Button
               onClick={() => {
+                setSlugManual(false)
                 setForm({
                   ...emptyForm,
                   plan_code: plans.data?.[0]?.code ?? 'growth',
@@ -121,15 +146,19 @@ export function TenantsPage() {
             {
               header: 'Brand',
               render: (tenant) => (
-                <button type="button" className="text-left font-medium underline-offset-2 hover:underline" onClick={() => {
-                  setDetail(tenant)
-                  setPlanCode(tenant.plan_code)
-                }}>
+                <button
+                  type="button"
+                  className="text-left font-medium underline-offset-2 hover:underline"
+                  onClick={() => {
+                    setDetail(tenant)
+                    setPlanCode(tenant.plan_code)
+                  }}
+                >
                   {tenant.name}
                 </button>
               ),
             },
-            { header: 'Industry', render: (tenant) => labelOf(industryLabel, tenant.industry) },
+            { header: 'Slug', render: (tenant) => tenant.slug },
             { header: 'Plan', render: (tenant) => tenant.plan_name },
             { header: 'Branches', render: (tenant) => String(tenant.branch_count) },
             { header: 'Status', render: (tenant) => <StatusBadge status={tenant.status} /> },
@@ -139,7 +168,12 @@ export function TenantsPage() {
                 canManage ? (
                   <div className="flex flex-wrap gap-2">
                     {transitions[tenant.status].map((action) => (
-                      <Button key={action.status} size="sm" variant="secondary" onClick={() => setPending({ tenant, ...action })}>
+                      <Button
+                        key={action.status}
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setPending({ tenant, ...action })}
+                      >
                         {action.label}
                       </Button>
                     ))}
@@ -160,62 +194,123 @@ export function TenantsPage() {
             createBrand.mutate(form, {
               onSuccess: (result) => {
                 setCreating(false)
-                setInviteResult({
-                  url: result.owner_invitation_url,
-                  emailSent: result.invitation_email_sent,
+                setCreatedNotice({
                   name: result.tenant.name,
+                  email: result.brand_admin_email,
+                  portalUrl: result.portal_url,
                 })
               },
             })
           }}
         >
-          <TextField label="Brand name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value, slug: form.slug || slugify(e.target.value) })} />
-          <TextField label="Slug" required value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
-          <TextField label="Legal / company name" value={form.legal_name} onChange={(e) => setForm({ ...form, legal_name: e.target.value })} />
-          <SelectField label="Industry" value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })}>
+          <TextField
+            label="Brand name"
+            required
+            value={form.name}
+            onChange={(e) => {
+              const name = e.target.value
+              setForm((prev) => ({
+                ...prev,
+                name,
+                slug: slugManual ? prev.slug : shortSlugFromName(name),
+              }))
+            }}
+          />
+          <TextField
+            label="Slug"
+            required
+            minLength={3}
+            value={form.slug}
+            onChange={(e) => {
+              setSlugManual(true)
+              setForm({ ...form, slug: sanitizeSlug(e.target.value) })
+            }}
+            hint={
+              form.slug
+                ? `Portal URL: ${typeof window !== 'undefined' ? window.location.origin : ''}/b/${form.slug}`
+                : 'Short code from the brand name. Editable; must be unique.'
+            }
+          />
+          <TextField
+            label="Legal / company name"
+            value={form.legal_name}
+            onChange={(e) => setForm({ ...form, legal_name: e.target.value })}
+          />
+          <SelectField
+            label="Industry"
+            value={form.industry}
+            onChange={(e) => setForm({ ...form, industry: e.target.value })}
+          >
             {Object.entries(industryLabel).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
               </option>
             ))}
           </SelectField>
-          <SelectField label="Plan" value={form.plan_code} onChange={(e) => setForm({ ...form, plan_code: e.target.value })}>
+          <SelectField
+            label="Plan"
+            value={form.plan_code}
+            onChange={(e) => setForm({ ...form, plan_code: e.target.value })}
+          >
             {(plans.data ?? []).map((plan) => (
               <option key={plan.code} value={plan.code}>
                 {plan.name}
               </option>
             ))}
           </SelectField>
-          <TextField label="Brand Admin email" type="email" required value={form.owner_email} onChange={(e) => setForm({ ...form, owner_email: e.target.value })} />
-          <TextField label="Primary notification email" type="email" value={form.contact_email} onChange={(e) => setForm({ ...form, contact_email: e.target.value })} hint="Defaults to the Brand Admin email if left blank." />
-          <TextField label="Contact phone" value={form.contact_phone} onChange={(e) => setForm({ ...form, contact_phone: e.target.value })} />
+          <TextField
+            label="Brand Admin name"
+            value={form.owner_full_name}
+            onChange={(e) => setForm({ ...form, owner_full_name: e.target.value })}
+          />
+          <TextField
+            label="Brand Admin email"
+            type="email"
+            required
+            value={form.owner_email}
+            onChange={(e) => setForm({ ...form, owner_email: e.target.value })}
+            hint="Must be unique. Used to sign in at /login."
+          />
+          <PasswordField
+            label="Brand Admin password"
+            required
+            value={form.owner_password}
+            onChange={(e) => setForm({ ...form, owner_password: e.target.value })}
+          />
+          <TextField
+            label="Contact phone"
+            value={form.contact_phone}
+            onChange={(e) => setForm({ ...form, contact_phone: e.target.value })}
+          />
           {createBrand.isError ? <p className="text-sm text-danger">{errorMessage(createBrand.error)}</p> : null}
           <div className="mt-2 flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setCreating(false)}>
               Cancel
             </Button>
             <Button type="submit" disabled={createBrand.isPending}>
-              Create & invite
+              Create brand
             </Button>
           </div>
         </form>
       </Modal>
 
-      <Modal open={Boolean(inviteResult)} title="Brand Admin invitation" onClose={() => setInviteResult(null)}>
+      <Modal open={Boolean(createdNotice)} title="Brand created" onClose={() => setCreatedNotice(null)}>
         <p className="text-ink-soft">
-          {inviteResult?.name} is ready. {inviteResult?.emailSent ? 'An invitation email was sent.' : 'Email could not be delivered; copy the link below.'}
+          {createdNotice?.name} is ready. Share the Brand Admin email and password you set. Brand users sign in at{' '}
+          <strong>/login</strong>.
         </p>
-        <TextField label="Invitation link" readOnly value={inviteResult?.url ?? ''} />
+        <div className="mt-4 grid gap-3">
+          <TextField label="Brand Admin email" readOnly value={createdNotice?.email ?? ''} />
+          <TextField label="Brand portal URL" readOnly value={createdNotice?.portalUrl ?? ''} />
+        </div>
         <div className="mt-4 flex justify-end gap-2">
           <Button
             variant="secondary"
-            onClick={() => {
-              void navigator.clipboard.writeText(inviteResult?.url ?? '')
-            }}
+            onClick={() => void navigator.clipboard.writeText(createdNotice?.portalUrl ?? '')}
           >
-            Copy link
+            Copy portal URL
           </Button>
-          <Button onClick={() => setInviteResult(null)}>Done</Button>
+          <Button onClick={() => setCreatedNotice(null)}>Done</Button>
         </div>
       </Modal>
 
@@ -250,10 +345,27 @@ export function TenantsPage() {
               <span className="text-ink-soft">Legal name:</span> {detail.legal_name || '—'}
             </p>
             <p>
-              <span className="text-ink-soft">Notification email:</span> {detail.contact_email || '—'}
+              <span className="text-ink-soft">Slug:</span> {detail.slug}
             </p>
             <p>
-              <span className="text-ink-soft">Subscription:</span> {detail.plan_name} ({detail.subscription_status || '—'})
+              <span className="text-ink-soft">Industry:</span> {labelOf(industryLabel, detail.industry)}
+            </p>
+            <p>
+              <span className="text-ink-soft">Brand Admin email:</span> {detail.contact_email || '—'}
+            </p>
+            <p>
+              <span className="text-ink-soft">Portal URL:</span>{' '}
+              {detail.portal_url ? (
+                <a className="break-all underline" href={detail.portal_url} target="_blank" rel="noreferrer">
+                  {detail.portal_url}
+                </a>
+              ) : (
+                '—'
+              )}
+            </p>
+            <p>
+              <span className="text-ink-soft">Subscription:</span> {detail.plan_name} (
+              {detail.subscription_status || '—'})
             </p>
             <p>
               <span className="text-ink-soft">Branches / members:</span> {detail.branch_count} / {detail.member_count}
@@ -305,12 +417,4 @@ function Metric({ label, value }: { label: string; value: string }) {
       <p className="mt-2 font-display text-3xl">{value}</p>
     </Panel>
   )
-}
-
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 63)
 }

@@ -1,21 +1,27 @@
+import re
+
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from apps.access_control.models import AssignmentScope
+from apps.access_control.models import AssignmentScope, MembershipRoleAssignment
 from apps.access_control.services import sync_system_roles
 from apps.audit_logs.services import record_event
 from apps.core.exceptions import BusinessRuleViolation, ConflictError
-from apps.core.validators import contrast_ratio
+from apps.core.validators import contrast_ratio, normalize_email
 from apps.subscriptions.services import require_feature, start_subscription
 
 from ..models import (
+    MembershipStatus,
     OnboardingStatus,
     Organization,
     OrganizationBranding,
+    OrganizationMembership,
     OrganizationStatus,
 )
-from .invitations import create_invitation_record
 
 MIN_TEXT_CONTRAST = 4.5
 
@@ -49,12 +55,54 @@ BRANDING_FIELDS = (
 )
 
 
+def build_portal_url(slug: str) -> str:
+    base = settings.FRONTEND_URL.rstrip("/")
+    return f"{base}/b/{slug}"
+
+
+def slugify_brand_name(name: str) -> str:
+    """
+    Meaningful portal slug from a brand name.
+    One word → that word; two or more → first + last (Bariq Mens Fashions → bariq-fashions).
+    """
+    words = [w for w in re.split(r"[^a-z0-9]+", (name or "").strip().lower()) if w]
+    if not words:
+        return "brand"
+    if len(words) == 1:
+        slug = words[0]
+    else:
+        slug = f"{words[0]}-{words[-1]}"
+    if len(slug) < 3:
+        slug = f"{slug}-brand"[:63]
+    return slug[:63]
+
+
+def allocate_unique_slug(base: str, *, exclude_pk=None) -> str:
+    """Return a unique organization slug, appending -2, -3, … when needed."""
+    base = slugify_brand_name(base)[:63]
+    if len(base) < 3:
+        base = (base + "-brand")[:63]
+    candidate = base
+    n = 2
+    while True:
+        qs = Organization.objects.filter(slug=candidate)
+        if exclude_pk is not None:
+            qs = qs.exclude(pk=exclude_pk)
+        if not qs.exists():
+            return candidate
+        suffix = f"-{n}"
+        candidate = f"{base[: 63 - len(suffix)]}{suffix}"
+        n += 1
+        if n > 9999:
+            raise ConflictError("Could not allocate a unique brand slug.")
+
+
 @transaction.atomic
 def onboard_organization(
     *,
     actor,
     name: str,
-    slug: str,
+    slug: str = "",
     industry: str,
     currency: str,
     timezone_name: str,
@@ -62,14 +110,34 @@ def onboard_organization(
     locale: str,
     plan,
     owner_email: str,
+    owner_password: str,
+    owner_full_name: str = "",
     request=None,
     legal_name: str = "",
     contact_email: str = "",
     contact_phone: str = "",
-) -> tuple[Organization, str]:
-    """Create a tenant (brand) with system roles, branding, a subscription and an owner invitation."""
-    if Organization.objects.filter(slug=slug).exists():
-        raise ConflictError("An organization with this slug already exists.")
+) -> Organization:
+    """
+    Create a brand and its Brand Admin account (email + password) in one step.
+    No invitation URL is issued — Super Admin sets credentials directly.
+    Slug is auto-derived from name when blank; explicit slugs must be unique.
+    """
+    raw_slug = (slug or "").strip().lower()
+    if raw_slug:
+        slug = raw_slug
+        if Organization.objects.filter(slug=slug).exists():
+            raise ConflictError("A brand with this slug already exists.")
+    else:
+        slug = allocate_unique_slug(name)
+
+    owner_email = normalize_email(owner_email)
+    if get_user_model().objects.filter(email__iexact=owner_email).exists():
+        raise ConflictError("This email is already used. Brand Admin email must be unique.")
+    if Organization.objects.filter(contact_email__iexact=owner_email).exists():
+        raise ConflictError("This email is already linked to another brand.")
+
+    validate_password(owner_password)
+
     now = timezone.now()
     organization = Organization(
         name=name,
@@ -82,8 +150,9 @@ def onboard_organization(
         legal_name=legal_name or "",
         contact_email=contact_email or owner_email,
         contact_phone=contact_phone or "",
+        portal_url=build_portal_url(slug),
         status=OrganizationStatus.ACTIVE,
-        onboarding_status=OnboardingStatus.IN_PROGRESS,
+        onboarding_status=OnboardingStatus.COMPLETED,
         activated_at=now,
     )
     organization.full_clean()
@@ -94,13 +163,25 @@ def onboard_organization(
     ensure_brand_notification_settings(organization)
     roles = sync_system_roles(organization)
     start_subscription(organization, plan)
-    invitation, raw_token = create_invitation_record(
-        organization=organization,
+
+    User = get_user_model()
+    owner = User.objects.create_user(
         email=owner_email,
-        role_assignments=[{"role_id": str(roles["owner"].pk), "scope": AssignmentScope.TENANT}],
-        branch_ids=[],
+        password=owner_password,
+        full_name=(owner_full_name or owner_email.split("@")[0]).strip()[:150],
+    )
+    membership = OrganizationMembership.objects.create(
+        organization=organization,
+        user=owner,
+        status=MembershipStatus.ACTIVE,
         is_owner=True,
-        invited_by=actor,
+    )
+    MembershipRoleAssignment.objects.create(
+        organization=organization,
+        membership=membership,
+        role=roles["owner"],
+        scope=AssignmentScope.TENANT,
+        assigned_by=actor if getattr(actor, "is_authenticated", False) else None,
     )
     record_event(
         action="platform.tenant_onboarded",
@@ -110,7 +191,7 @@ def onboard_organization(
         metadata={"slug": slug, "plan": plan.code, "owner_email": owner_email},
         request=request,
     )
-    return organization, raw_token
+    return organization
 
 
 _STATUS_TRANSITIONS = {
@@ -160,6 +241,14 @@ def update_organization_settings(ctx, data: dict, *, request=None) -> Organizati
         if field in data and getattr(organization, field) != data[field]:
             changed[field] = [getattr(organization, field), data[field]]
             setattr(organization, field, data[field])
+    if "slug" in data and data["slug"] and data["slug"] != organization.slug:
+        new_slug = data["slug"].strip().lower()
+        if Organization.objects.filter(slug=new_slug).exclude(pk=organization.pk).exists():
+            raise ConflictError("A brand with this slug already exists.")
+        changed["slug"] = [organization.slug, new_slug]
+        organization.slug = new_slug
+        organization.portal_url = build_portal_url(new_slug)
+        changed["portal_url"] = organization.portal_url
     if changed:
         organization.full_clean()
         organization.save()

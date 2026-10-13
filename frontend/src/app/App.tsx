@@ -1,8 +1,10 @@
-import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, Navigate, RouterProvider, useParams } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '../shared/api/queryClient.ts'
 import { AcceptInvitePage } from '../features/auth/AcceptInvitePage.tsx'
+import { ForgotPasswordPage } from '../features/auth/ForgotPasswordPage.tsx'
 import { LoginPage } from '../features/auth/LoginPage.tsx'
+import { SuperAdminLoginPage } from '../features/auth/SuperAdminLoginPage.tsx'
 import { AuditPage } from '../features/audit/AuditPage.tsx'
 import { BranchesPage } from '../features/branches/BranchesPage.tsx'
 import { ApprovalsPage } from '../features/expenses/ApprovalsPage.tsx'
@@ -23,6 +25,11 @@ const router = createBrowserRouter([
     element: <SessionGate />,
     children: [
       { path: '/login', element: <LoginPage /> },
+      { path: '/forgot-password', element: <Navigate to="/login" replace /> },
+      { path: '/superadmin/login', element: <SuperAdminLoginPage /> },
+      { path: '/b/:brandSlug', element: <BrandPortalRedirect /> },
+      { path: '/b/:brandSlug/login', element: <LoginPage /> },
+      { path: '/b/:brandSlug/forgot-password', element: <ForgotPasswordPage /> },
       { path: '/invitations/accept', element: <AcceptInvitePage /> },
       {
         element: <RequireSession />,
@@ -50,6 +57,11 @@ const router = createBrowserRouter([
     ],
   },
 ])
+
+function BrandPortalRedirect() {
+  const { brandSlug } = useParams<{ brandSlug: string }>()
+  return <Navigate to={`/b/${brandSlug}/login`} replace />
+}
 
 export function App() {
   return (

@@ -12,9 +12,12 @@ from apps.audit_logs.services import record_event
 from .. import services
 from .serializers import (
     AccessTokenSerializer,
+    BrandPortalSerializer,
     LoginSerializer,
     MeSerializer,
     PasswordChangeSerializer,
+    PasswordForgotSerializer,
+    PasswordResetSerializer,
     ProfileUpdateSerializer,
     SessionSerializer,
 )
@@ -36,18 +39,30 @@ def _require_trusted_origin(request) -> None:
 
 class LoginView(PublicAuthView):
     throttle_scope = "auth_login"
+    platform_only = False
 
     @extend_schema(request=LoginSerializer, responses=SessionSerializer)
     def post(self, request):
         _require_trusted_origin(request)
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = services.authenticate_credentials(request, **serializer.validated_data)
+        user = services.authenticate_credentials(
+            request,
+            identifier=serializer.validated_data["identifier"],
+            password=serializer.validated_data["password"],
+            platform_only=self.platform_only,
+        )
         access, refresh = services.issue_tokens(user)
         record_event(action="auth.login", actor=user, request=request)
         response = Response({"access": access, "user": MeSerializer(user).data})
         services.set_refresh_cookie(response, refresh)
         return response
+
+
+class SuperAdminLoginView(LoginView):
+    """Separate Super Admin login endpoint used by /superadmin/login."""
+
+    platform_only = True
 
 
 class RefreshView(PublicAuthView):
@@ -97,6 +112,59 @@ class PasswordChangeView(APIView):
         response = Response({"access": access})
         services.set_refresh_cookie(response, refresh)
         return response
+
+
+class BrandPortalView(PublicAuthView):
+    """Public brand card for /b/{slug}/login — name + masked Brand Admin email."""
+
+    throttle_scope = "auth_login"
+
+    @extend_schema(responses=BrandPortalSerializer)
+    def get(self, request, slug: str):
+        portal = services.get_brand_portal(slug)
+        if portal is None:
+            return Response(
+                {"error": {"code": "not_found", "message": "Brand not found."}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(BrandPortalSerializer(portal).data)
+
+
+class PasswordForgotView(PublicAuthView):
+    """Send OTP to this brand's Brand Admin (resolved from slug). No email input."""
+
+    throttle_scope = "auth_password_reset"
+
+    @extend_schema(request=PasswordForgotSerializer, responses={200: None})
+    def post(self, request):
+        _require_trusted_origin(request)
+        serializer = PasswordForgotSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.request_password_reset(slug=serializer.validated_data["slug"], request=request)
+        return Response(
+            {
+                "detail": "If this brand has a Brand Admin, a one-time code was sent to their email.",
+            }
+        )
+
+
+class PasswordResetView(PublicAuthView):
+    """Confirm OTP and set a new Brand Admin password for this brand slug."""
+
+    throttle_scope = "auth_password_reset"
+
+    @extend_schema(request=PasswordResetSerializer, responses={200: None})
+    def post(self, request):
+        _require_trusted_origin(request)
+        serializer = PasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.confirm_password_reset(
+            slug=serializer.validated_data["slug"],
+            otp=serializer.validated_data["otp"],
+            new_password=serializer.validated_data["new_password"],
+            request=request,
+        )
+        return Response({"detail": "Password updated. You can sign in now."})
 
 
 class MeView(APIView):

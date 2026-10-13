@@ -58,6 +58,8 @@ class Organization(TimeStampedModel):
 
     contact_email = models.EmailField(blank=True)
     contact_phone = models.CharField(max_length=32, blank=True)
+    # Public brand entry URL, e.g. https://app.example/b/zaylan
+    portal_url = models.URLField(max_length=500, blank=True)
     address_line1 = models.CharField(max_length=200, blank=True)
     address_line2 = models.CharField(max_length=200, blank=True)
     city = models.CharField(max_length=100, blank=True)

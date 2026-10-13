@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from apps.access_control.models import MembershipRoleAssignment, Role
+from apps.access_control.models import AssignmentScope, MembershipRoleAssignment, Role
 from apps.access_control.services import set_member_roles
 from apps.accounts import services as auth_services
 from apps.accounts.api.serializers import SessionSerializer
@@ -33,7 +33,7 @@ from ..services.invitations import (
     invite_member,
     revoke_invitation,
 )
-from ..services.members import change_membership_status
+from ..services.members import change_membership_status, create_staff_member
 from ..services.organizations import update_branding, update_organization_settings
 from .base import TenantAPIView, TenantScopedViewSet
 from .serializers import (
@@ -48,6 +48,7 @@ from .serializers import (
     MemberRolesInputSerializer,
     MembershipSerializer,
     MembershipStatusSerializer,
+    StaffCreateSerializer,
     MyOrganizationSerializer,
     OrganizationSerializer,
     PermissionsSerializer,
@@ -198,12 +199,13 @@ class MemberViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, TenantScop
     permission_rules = {
         "list": "members.view",
         "retrieve": "members.view",
+        "create": "members.manage",
         "set_status": "members.manage",
         "set_roles": "roles.manage",
         "set_branches": "members.manage",
     }
     branch_scoped_actions = ("list", "retrieve")
-    search_fields = ("user__email", "user__full_name")
+    search_fields = ("user__email", "user__username", "user__full_name")
     ordering_fields = ("joined_at", "user__full_name")
     filterset_fields = ("status",)
 
@@ -229,6 +231,35 @@ class MemberViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, TenantScop
                 branch_access__branch_id__in=ctx.branch_ids_with("members.view")
             ).distinct()
         return queryset
+
+    @extend_schema(request=StaffCreateSerializer, responses={201: MembershipSerializer})
+    def create(self, request):
+        serializer = StaffCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        role = Role.objects.filter(
+            organization=request.tenant.organization, pk=data["role_id"]
+        ).first()
+        if role is None:
+            raise BusinessRuleViolation("Unknown role.")
+        branches = resolve_branches(request.tenant, data.get("branch_ids") or [])
+        scope = AssignmentScope.BRANCHES if branches else AssignmentScope.TENANT
+        if role.key == "owner":
+            raise BusinessRuleViolation("Cannot assign the owner role through staff creation.")
+        membership = create_staff_member(
+            request.tenant,
+            username=data["username"],
+            password=data["password"],
+            full_name=data.get("full_name", ""),
+            role=role,
+            scope=scope,
+            branches=branches,
+            request=request,
+        )
+        return Response(
+            self.get_serializer(self.get_queryset().get(pk=membership.pk)).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @extend_schema(request=MembershipStatusSerializer, responses=MembershipSerializer)
     @action(detail=True, methods=["post"], url_path="status")

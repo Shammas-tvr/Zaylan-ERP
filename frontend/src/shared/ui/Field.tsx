@@ -1,4 +1,4 @@
-import { useId, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { useId, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import { cn } from '../labels.ts'
 
 const controlClass =
@@ -14,6 +14,40 @@ export function TextField({
   return (
     <FieldShell id={id} label={label} hint={hint} error={error}>
       <input id={id} className={cn(controlClass, 'h-11')} aria-invalid={Boolean(error)} {...props} />
+    </FieldShell>
+  )
+}
+
+/** Password input with show/hide and a clear requirement hint by default. */
+export function PasswordField({
+  label = 'Password',
+  hint = 'At least 6 characters.',
+  error,
+  minLength = 6,
+  ...props
+}: { label?: string; hint?: string; error?: string } & Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const id = useId()
+  const [visible, setVisible] = useState(false)
+  return (
+    <FieldShell id={id} label={label} hint={hint} error={error}>
+      <div className="relative">
+        <input
+          id={id}
+          type={visible ? 'text' : 'password'}
+          className={cn(controlClass, 'h-11 pr-16')}
+          aria-invalid={Boolean(error)}
+          minLength={minLength}
+          {...props}
+        />
+        <button
+          type="button"
+          className="absolute inset-y-0 right-2 my-auto h-8 rounded-lg px-2 text-xs font-medium text-ink-soft hover:text-ink"
+          onClick={() => setVisible((v) => !v)}
+          aria-label={visible ? 'Hide password' : 'Show password'}
+        >
+          {visible ? 'Hide' : 'Show'}
+        </button>
+      </div>
     </FieldShell>
   )
 }

@@ -5,7 +5,7 @@ import { acceptInvitation } from '../../shared/api/workspace.ts'
 import { errorMessage } from '../../shared/api/errors.ts'
 import { usePageTitle } from '../../shared/hooks.ts'
 import { Button } from '../../shared/ui/Button.tsx'
-import { TextField } from '../../shared/ui/Field.tsx'
+import { PasswordField, TextField } from '../../shared/ui/Field.tsx'
 import { Wordmark } from '../../shared/ui/Wordmark.tsx'
 
 export function AcceptInvitePage() {
@@ -33,13 +33,9 @@ export function AcceptInvitePage() {
         >
           <p className="text-ink-soft">Create your account to join this organization. If you already have an account, sign in with the invited email first.</p>
           <TextField label="Full name" required value={fullName} onChange={(event) => setFullName(event.target.value)} />
-          <TextField
-            label="Password"
-            type="password"
+          <PasswordField
             autoComplete="new-password"
             required
-            minLength={10}
-            hint="At least 10 characters."
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />

@@ -395,6 +395,7 @@ export const initialPreview: PreviewData = {
       member_count: 4,
       contact_email: 'hello@zaylan.test',
       legal_name: 'Zaylan',
+      portal_url: 'http://localhost:5173/b/zaylan',
     },
     {
       id: CEDAR_ID,
@@ -409,6 +410,7 @@ export const initialPreview: PreviewData = {
       member_count: 3,
       contact_email: 'hello@cedar.test',
       legal_name: 'Cedar Bakehouse',
+      portal_url: 'http://localhost:5173/b/cedar-bakehouse',
     },
     {
       id: '4b2e6a10-1c3a-4e5f-9a11-0a0a0a0a0003',
@@ -423,6 +425,7 @@ export const initialPreview: PreviewData = {
       member_count: 18,
       contact_email: 'hello@northwind.test',
       legal_name: 'Northwind Retail Pvt Ltd',
+      portal_url: 'http://localhost:5173/b/northwind',
     },
   ],
   plans: [

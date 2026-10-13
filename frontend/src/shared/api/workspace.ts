@@ -143,11 +143,49 @@ function auditSummary(row: { action: string; target_type?: string; metadata?: Re
   return row.target_type || row.action
 }
 
-export async function login(email: string, password: string) {
-  const { data } = await client.post<{ access: string; user: Me }>('/auth/login', { email, password })
+export async function login(identifier: string, password: string) {
+  const { data } = await client.post<{ access: string; user: Me }>('/auth/login', {
+    identifier,
+    password,
+  })
   resetPreview()
   sessionStore.set({ accessToken: data.access, preview: false })
   return data.user
+}
+
+export async function superAdminLogin(email: string, password: string) {
+  const { data } = await client.post<{ access: string; user: Me }>('/auth/superadmin/login', {
+    identifier: email,
+    password,
+  })
+  resetPreview()
+  sessionStore.set({ accessToken: data.access, preview: false, organizationId: null, branchId: null })
+  return data.user
+}
+
+export type BrandPortal = {
+  name: string
+  slug: string
+  masked_admin_email: string
+}
+
+export async function getBrandPortal(slug: string): Promise<BrandPortal> {
+  const { data } = await client.get<BrandPortal>(`/auth/brands/${encodeURIComponent(slug)}/portal`)
+  return data
+}
+
+export async function requestPasswordReset(slug: string) {
+  const { data } = await client.post<{ detail: string }>('/auth/password/forgot', { slug })
+  return data
+}
+
+export async function confirmPasswordReset(input: {
+  slug: string
+  otp: string
+  new_password: string
+}) {
+  const { data } = await client.post<{ detail: string }>('/auth/password/reset', input)
+  return data
 }
 
 export async function logout() {
@@ -404,6 +442,7 @@ function mapPlatformTenant(row: Record<string, unknown>): PlatformTenant {
     member_count: Number(usage.members ?? 0),
     contact_email: String(row.contact_email ?? ''),
     legal_name: String(row.legal_name ?? ''),
+    portal_url: String(row.portal_url ?? ''),
   }
 }
 
@@ -432,10 +471,11 @@ export async function getPlatformMetrics(): Promise<PlatformMetrics> {
 
 export async function createBrand(input: BrandOnboardInput): Promise<BrandOnboardResult> {
   if (isPreview()) {
+    const slug = input.slug
     const tenant: PlatformTenant = {
       id: crypto.randomUUID(),
       name: input.name,
-      slug: input.slug,
+      slug,
       industry: input.industry,
       status: 'active',
       plan_name: input.plan_code,
@@ -443,28 +483,71 @@ export async function createBrand(input: BrandOnboardInput): Promise<BrandOnboar
       subscription_status: 'trialing',
       branch_count: 0,
       member_count: 0,
-      contact_email: input.contact_email ?? input.owner_email,
+      contact_email: input.owner_email,
       legal_name: input.legal_name ?? '',
+      portal_url: `${window.location.origin}/b/${slug}`,
     }
     return {
       tenant,
-      owner_invitation_url: `${window.location.origin}/invitations/accept#token=preview`,
-      invitation_email_sent: true,
+      brand_admin_email: input.owner_email,
+      portal_url: tenant.portal_url,
     }
   }
+  const ownerEmail = input.owner_email.trim()
   const { data } = await client.post<{
     tenant: Record<string, unknown>
-    owner_invitation_url: string
-    invitation_email_sent: boolean
+    brand_admin_email: string
+    portal_url: string
   }>('/platform/tenants', {
-    ...input,
-    industry: input.industry.toUpperCase(),
+    name: input.name.trim(),
+    slug: input.slug.trim(),
+    industry: input.industry.trim().toUpperCase().replace(/-/g, '_'),
+    plan_code: input.plan_code,
+    owner_email: ownerEmail,
+    owner_password: input.owner_password,
+    owner_full_name: input.owner_full_name?.trim() || '',
+    legal_name: input.legal_name?.trim() || '',
+    contact_phone: input.contact_phone?.trim() || '',
+    currency: input.currency || 'INR',
+    timezone: input.timezone || 'Asia/Kolkata',
+    country: input.country || 'IN',
+    locale: input.locale || 'en-IN',
   })
   return {
     tenant: mapPlatformTenant(data.tenant),
-    owner_invitation_url: data.owner_invitation_url,
-    invitation_email_sent: data.invitation_email_sent,
+    brand_admin_email: data.brand_admin_email,
+    portal_url: data.portal_url,
   }
+}
+
+export async function getTenant(id: string): Promise<PlatformTenant> {
+  if (isPreview()) {
+    const tenant = readPreview().tenants.find((item) => item.id === id)
+    if (!tenant) throw new Error('Brand not found.')
+    return tenant
+  }
+  const { data } = await client.get<Record<string, unknown>>(`/platform/tenants/${id}`)
+  return mapPlatformTenant(data)
+}
+
+export async function createStaffMember(input: {
+  username: string
+  password: string
+  full_name: string
+  role_id: string
+  branch_ids: string[]
+}) {
+  if (isPreview()) {
+    return previewInvite(input.username, 'Staff')
+  }
+  const { data } = await client.post('/organization/members', {
+    username: input.username,
+    password: input.password,
+    full_name: input.full_name,
+    role_id: input.role_id,
+    branch_ids: input.branch_ids,
+  })
+  return data
 }
 
 export async function setTenantStatus(id: string, status: OrgStatus) {

@@ -35,6 +35,7 @@ class TenantSerializer(serializers.ModelSerializer):
             "country",
             "contact_email",
             "contact_phone",
+            "portal_url",
             "created_at",
             "activated_at",
             "suspended_at",
@@ -61,23 +62,22 @@ class TenantDetailSerializer(TenantSerializer):
 
 class TenantOnboardSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=150)
-    slug = serializers.SlugField(max_length=63, min_length=3)
+    # Optional: auto-generated from name when blank; must be unique when set.
+    slug = serializers.SlugField(max_length=63, min_length=3, required=False, allow_blank=True)
     industry = serializers.ChoiceField(choices=Industry.choices)
     currency = serializers.RegexField(r"^[A-Z]{3}$", default="INR")
     timezone = serializers.CharField(max_length=64, default="Asia/Kolkata")
     country = serializers.RegexField(r"^[A-Z]{2}$", default="IN")
     locale = serializers.CharField(max_length=16, default="en-IN")
     legal_name = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
-    contact_email = serializers.EmailField(required=False, allow_blank=True, default="")
     contact_phone = serializers.CharField(max_length=32, required=False, allow_blank=True, default="")
     plan_code = serializers.SlugField()
     owner_email = serializers.EmailField(max_length=254)
+    owner_password = serializers.CharField(max_length=128, min_length=6, trim_whitespace=False)
+    owner_full_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
 
     def validate_owner_email(self, value: str) -> str:
         return normalize_email(value)
-
-    def validate_contact_email(self, value: str) -> str:
-        return normalize_email(value) if value else ""
 
     def validate_plan_code(self, value: str) -> Plan:
         plan = Plan.objects.filter(code=value, is_active=True).first()
@@ -88,8 +88,8 @@ class TenantOnboardSerializer(serializers.Serializer):
 
 class TenantOnboardedSerializer(serializers.Serializer):
     tenant = TenantSerializer()
-    owner_invitation_url = serializers.CharField()
-    invitation_email_sent = serializers.BooleanField()
+    brand_admin_email = serializers.EmailField()
+    portal_url = serializers.URLField()
 
 
 class TenantStatusSerializer(serializers.Serializer):

@@ -1,19 +1,17 @@
 import { useState } from 'react'
-import { useInvitations, useMembers, useRevokeInvitation, useRoles, useSendInvitation, useWorkspace } from '../workspace/queries.ts'
+import { useCreateStaff, useMembers, useRoles, useWorkspace } from '../workspace/queries.ts'
 import { errorMessage } from '../../shared/api/errors.ts'
 import { usePageTitle } from '../../shared/hooks.ts'
-import { formatWhen } from '../../shared/labels.ts'
 import { can, permissionCatalog } from '../../shared/permissions.ts'
 import { Button } from '../../shared/ui/Button.tsx'
 import { DataTable } from '../../shared/ui/DataTable.tsx'
-import { SelectField, TextField } from '../../shared/ui/Field.tsx'
+import { PasswordField, SelectField, TextField } from '../../shared/ui/Field.tsx'
 import { NoAccess, Notice } from '../../shared/ui/Feedback.tsx'
 import { Modal } from '../../shared/ui/Modal.tsx'
 import { PageHeader, Panel, StatusBadge } from '../../shared/ui/PageHeader.tsx'
 
 const tabs = [
   { id: 'members', label: 'Members' },
-  { id: 'invitations', label: 'Invitations' },
   { id: 'roles', label: 'Roles' },
 ] as const
 
@@ -29,7 +27,6 @@ export function PeoplePage() {
   const [tab, setTab] = useState<(typeof tabs)[number]['id']>('members')
   const [open, setOpen] = useState(false)
   const visibleTabs = tabs.filter((item) => {
-    if (item.id === 'invitations') return canManage
     if (item.id === 'roles') return canViewRoles
     return true
   })
@@ -41,10 +38,10 @@ export function PeoplePage() {
     <div className="grid gap-6">
       <PageHeader
         title="People"
-        description="Roles decide what a person can do. Branch access decides where they can do it."
+        description="Create brand staff with username and password. Roles decide what they can do."
         action={
           canManage ? (
-            <Button onClick={() => setOpen(true)}>Invite person</Button>
+            <Button onClick={() => setOpen(true)}>Add staff</Button>
           ) : null
         }
       />
@@ -71,7 +68,13 @@ export function PeoplePage() {
             empty="No members yet."
             columns={[
               { header: 'Name', render: (member) => <span className="font-medium">{member.full_name}</span> },
-              { header: 'Email', render: (member) => member.email },
+              {
+                header: 'Login',
+                render: (member) =>
+                  member.email.includes('.staff.zaylan.local')
+                    ? member.email.split('@')[0]
+                    : member.email,
+              },
               { header: 'Branches', render: (member) => member.branches.join(', ') },
               { header: 'Roles', render: (member) => member.roles.join(', ') },
               { header: 'Status', render: (member) => <StatusBadge status={member.status} /> },
@@ -79,7 +82,6 @@ export function PeoplePage() {
           />
         </Panel>
       ) : null}
-      {tab === 'invitations' ? <Invitations timezone={context.organization.timezone} /> : null}
       {tab === 'roles' ? (
         <div className="grid gap-4 lg:grid-cols-2">
           {(roles.data ?? []).map((role) => (
@@ -89,7 +91,11 @@ export function PeoplePage() {
                   <h2 className="font-display text-2xl">{role.name}</h2>
                   <p className="mt-1 text-sm text-ink-soft">{role.description}</p>
                 </div>
-                {role.is_system ? <span className="rounded-full bg-cream px-2.5 py-1 text-xs font-medium text-ink-soft">Default</span> : null}
+                {role.is_system ? (
+                  <span className="rounded-full bg-cream px-2.5 py-1 text-xs font-medium text-ink-soft">
+                    Default
+                  </span>
+                ) : null}
               </div>
               <ul className="mt-4 grid gap-1 text-sm text-ink-soft">
                 {role.permissions.slice(0, 6).map((code) => (
@@ -104,8 +110,10 @@ export function PeoplePage() {
         </div>
       ) : null}
       {open ? (
-        <InviteModal
-          roles={(roles.data ?? []).map((role) => ({ id: role.id, name: role.name }))}
+        <StaffModal
+          roles={(roles.data ?? [])
+            .filter((role) => role.name.toLowerCase() !== 'owner / admin')
+            .map((role) => ({ id: role.id, name: role.name }))}
           branches={context.branches.map((branch) => ({ id: branch.id, name: branch.name }))}
           onClose={() => setOpen(false)}
         />
@@ -114,39 +122,7 @@ export function PeoplePage() {
   )
 }
 
-function Invitations({ timezone }: { timezone: string }) {
-  const invitations = useInvitations()
-  const revoke = useRevokeInvitation()
-  return (
-    <Panel>
-      <DataTable
-        caption="Invitations"
-        rows={invitations.data ?? []}
-        rowKey={(invitation) => invitation.id}
-        empty="No invitations."
-        columns={[
-          { header: 'Email', render: (invitation) => invitation.email },
-          { header: 'Role', render: (invitation) => invitation.role_name },
-          { header: 'Expires', render: (invitation) => formatWhen(invitation.expires_at, timezone) },
-          { header: 'Status', render: (invitation) => <StatusBadge status={invitation.status} /> },
-          {
-            header: 'Action',
-            render: (invitation) =>
-              invitation.status === 'pending' ? (
-                <Button size="sm" variant="secondary" onClick={() => revoke.mutate(invitation.id)}>
-                  Revoke
-                </Button>
-              ) : (
-                '—'
-              ),
-          },
-        ]}
-      />
-    </Panel>
-  )
-}
-
-function InviteModal({
+function StaffModal({
   roles,
   branches,
   onClose,
@@ -155,27 +131,57 @@ function InviteModal({
   branches: Array<{ id: string; name: string }>
   onClose: () => void
 }) {
-  const send = useSendInvitation()
-  const [email, setEmail] = useState('')
+  const create = useCreateStaff()
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [fullName, setFullName] = useState('')
   const [roleId, setRoleId] = useState(roles[0]?.id ?? '')
   const [branchIds, setBranchIds] = useState<string[]>([])
   const [notice, setNotice] = useState<string | null>(null)
 
   return (
-    <Modal open title="Invite person" onClose={onClose}>
+    <Modal open title="Add staff" onClose={onClose}>
       <form
         className="grid gap-4"
         onSubmit={(event) => {
           event.preventDefault()
-          send.mutate(
-            { email, role_id: roleId, branch_ids: branchIds },
+          create.mutate(
             {
-              onSuccess: () => setNotice(`Invitation prepared for ${email}.`),
+              username,
+              password,
+              full_name: fullName,
+              role_id: roleId,
+              branch_ids: branchIds,
+            },
+            {
+              onSuccess: () => {
+                setNotice(`Staff account “${username}” created.`)
+                setUsername('')
+                setPassword('')
+                setFullName('')
+              },
             },
           )
         }}
       >
-        <TextField label="Email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
+        <TextField
+          label="Full name"
+          value={fullName}
+          onChange={(event) => setFullName(event.target.value)}
+        />
+        <TextField
+          label="Username"
+          required
+          minLength={3}
+          value={username}
+          onChange={(event) => setUsername(event.target.value.trim())}
+          hint="Staff sign in with this username at /login."
+        />
+        <PasswordField
+          required
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+        />
         <SelectField label="Role" value={roleId} onChange={(event) => setRoleId(event.target.value)}>
           {roles.map((role) => (
             <option key={role.id} value={role.id}>
@@ -185,7 +191,7 @@ function InviteModal({
         </SelectField>
         <fieldset className="grid gap-2">
           <legend className="text-sm font-medium">Branches</legend>
-          <p className="text-sm text-ink-soft">Leave this empty for access across the organization.</p>
+          <p className="text-sm text-ink-soft">Leave empty for brand-wide access when the role allows it.</p>
           {branches.map((branch) => (
             <label key={branch.id} className="flex items-center gap-2 text-sm">
               <input
@@ -193,7 +199,9 @@ function InviteModal({
                 checked={branchIds.includes(branch.id)}
                 onChange={(event) =>
                   setBranchIds((current) =>
-                    event.target.checked ? [...current, branch.id] : current.filter((id) => id !== branch.id),
+                    event.target.checked
+                      ? [...current, branch.id]
+                      : current.filter((id) => id !== branch.id),
                   )
                 }
               />
@@ -202,13 +210,13 @@ function InviteModal({
           ))}
         </fieldset>
         {notice ? <Notice>{notice}</Notice> : null}
-        {send.isError ? <p className="text-sm text-danger">{errorMessage(send.error)}</p> : null}
+        {create.isError ? <p className="text-sm text-danger">{errorMessage(create.error)}</p> : null}
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             Close
           </Button>
-          <Button type="submit" disabled={send.isPending || !roleId}>
-            {send.isPending ? 'Sending…' : 'Send invitation'}
+          <Button type="submit" disabled={create.isPending || !roleId}>
+            {create.isPending ? 'Creating…' : 'Create staff'}
           </Button>
         </div>
       </form>

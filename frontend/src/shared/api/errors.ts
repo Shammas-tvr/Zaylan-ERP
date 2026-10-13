@@ -34,5 +34,22 @@ export function toApiError(error: unknown): ApiError {
 }
 
 export function errorMessage(error: unknown) {
-  return toApiError(error).message
+  const apiError = toApiError(error)
+  const details = formatDetails(apiError.details)
+  if (details) return `${apiError.message} ${details}`.trim()
+  return apiError.message
+}
+
+function formatDetails(details: unknown): string {
+  if (!details || typeof details !== 'object') return ''
+  const parts: string[] = []
+  for (const [field, value] of Object.entries(details as Record<string, unknown>)) {
+    if (field === 'non_field_errors') {
+      parts.push(Array.isArray(value) ? value.map(String).join(' ') : String(value))
+      continue
+    }
+    const text = Array.isArray(value) ? value.map(String).join(' ') : String(value)
+    parts.push(`${field}: ${text}`)
+  }
+  return parts.join(' ')
 }

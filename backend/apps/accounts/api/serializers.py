@@ -6,7 +6,7 @@ from apps.accounts.models import User
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ("id", "email", "full_name", "date_joined")
+        fields = ("id", "email", "username", "full_name", "date_joined")
         read_only_fields = fields
 
 
@@ -24,8 +24,17 @@ class MeSerializer(UserSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField(max_length=254)
+    # Accept email (Brand Admin) or username (brand staff). ``email`` kept for compatibility.
+    identifier = serializers.CharField(max_length=254, required=False, allow_blank=True)
+    email = serializers.CharField(max_length=254, required=False, allow_blank=True)
     password = serializers.CharField(max_length=128, trim_whitespace=False)
+
+    def validate(self, attrs):
+        identifier = (attrs.get("identifier") or attrs.get("email") or "").strip()
+        if not identifier:
+            raise serializers.ValidationError({"identifier": ["Email or username is required."]})
+        attrs["identifier"] = identifier
+        return attrs
 
 
 class SessionSerializer(serializers.Serializer):
@@ -40,6 +49,22 @@ class AccessTokenSerializer(serializers.Serializer):
 class PasswordChangeSerializer(serializers.Serializer):
     current_password = serializers.CharField(max_length=128, trim_whitespace=False)
     new_password = serializers.CharField(max_length=128, trim_whitespace=False)
+
+
+class BrandPortalSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    slug = serializers.SlugField()
+    masked_admin_email = serializers.CharField(allow_blank=True)
+
+
+class PasswordForgotSerializer(serializers.Serializer):
+    slug = serializers.SlugField(max_length=63)
+
+
+class PasswordResetSerializer(serializers.Serializer):
+    slug = serializers.SlugField(max_length=63)
+    otp = serializers.CharField(max_length=6, min_length=6)
+    new_password = serializers.CharField(max_length=128, min_length=6, trim_whitespace=False)
 
 
 class ProfileUpdateSerializer(serializers.Serializer):

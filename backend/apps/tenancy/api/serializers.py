@@ -102,6 +102,14 @@ class MembershipStatusSerializer(serializers.Serializer):
     )
 
 
+class StaffCreateSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150, min_length=3)
+    password = serializers.CharField(max_length=128, min_length=6, trim_whitespace=False)
+    full_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
+    role_id = serializers.UUIDField()
+    branch_ids = serializers.ListField(child=serializers.UUIDField(), required=False, default=list)
+
+
 class RoleAssignmentInputSerializer(serializers.Serializer):
     role_id = serializers.UUIDField()
     scope = serializers.ChoiceField(choices=AssignmentScope.choices)

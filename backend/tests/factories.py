@@ -12,7 +12,6 @@ from apps.subscriptions.models import Plan
 from apps.subscriptions.services import ensure_default_plans
 from apps.tenancy.context import TenantContext, resolve_tenant_context
 from apps.tenancy.models import MembershipStatus, OrganizationMembership
-from apps.tenancy.services.invitations import accept_invitation
 from apps.tenancy.services.organizations import onboard_organization
 
 ORIGIN = "http://localhost:5173"
@@ -46,8 +45,10 @@ def create_tenant(
     name: str | None = None,
     owner_email: str | None = None,
     plan_code: str = "growth",
+    owner_password: str = PASSWORD,
 ) -> dict:
-    organization, token = onboard_organization(
+    email = owner_email or f"owner@{slug}.test"
+    organization = onboard_organization(
         actor=None,
         name=name or slug.title(),
         slug=slug,
@@ -57,17 +58,27 @@ def create_tenant(
         country="IN",
         locale="en-IN",
         plan=plan(plan_code),
-        owner_email=owner_email or f"owner@{slug}.test",
+        owner_email=email,
+        owner_password=owner_password,
+        owner_full_name="Owner",
+    )
+    membership = OrganizationMembership.objects.select_related("user").get(
+        organization=organization, is_owner=True
     )
     return {
         "organization": organization,
-        "token": token,
-        "owner_email": owner_email or f"owner@{slug}.test",
+        "owner_email": email,
+        "user": membership.user,
+        "membership": membership,
     }
 
 
 def accept_owner(tenant: dict, email: str | None = None) -> dict:
-    membership, user, _ = accept_invitation(tenant["token"], full_name="Owner", password=PASSWORD)
+    """Compatibility helper: brand admin is created during onboard now."""
+    membership = tenant.get("membership") or OrganizationMembership.objects.select_related(
+        "user"
+    ).get(organization=tenant["organization"], is_owner=True)
+    user = tenant.get("user") or membership.user
     assert user.email == (email or tenant["owner_email"])
     return {"user": user, "membership": membership, "organization": membership.organization}
 
@@ -148,7 +159,7 @@ def api_client(user=None, *, organization=None, origin: str = ORIGIN) -> APIClie
 def login(client: APIClient, email: str, password: str = PASSWORD, origin: str = ORIGIN):
     return client.post(
         "/api/v1/auth/login",
-        {"email": email, "password": password},
+        {"identifier": email, "password": password},
         format="json",
         HTTP_ORIGIN=origin,
     )

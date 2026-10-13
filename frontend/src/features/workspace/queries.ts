@@ -9,6 +9,7 @@ import {
   createExpense,
   createExpenseCategory,
   createRecurringExpense,
+  createStaffMember,
   getContext,
   getExpense,
   getExpenseReport,
@@ -181,6 +182,14 @@ export function useSendInvitation() {
   const refresh = useRefresh(['invitations', 'audit'])
   return useMutation({
     mutationFn: sendInvitation,
+    onSuccess: refresh,
+  })
+}
+
+export function useCreateStaff() {
+  const refresh = useRefresh(['members', 'audit'])
+  return useMutation({
+    mutationFn: createStaffMember,
     onSuccess: refresh,
   })
 }

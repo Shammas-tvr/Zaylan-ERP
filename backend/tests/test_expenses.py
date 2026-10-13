@@ -65,16 +65,53 @@ def test_platform_can_create_brand_and_invite(settings):
             "industry": "RETAIL",
             "plan_code": "growth",
             "owner_email": "admin@zaylan.test",
+            "owner_password": "AdminPass1",
+            "owner_full_name": "Brand Admin",
             "legal_name": "Zaylan Pvt Ltd",
-            "contact_email": "ops@zaylan.test",
         },
         format="json",
     )
     assert response.status_code == 201, response.data
-    assert response.data["owner_invitation_url"]
-    assert response.data["tenant"]["contact_email"] == "ops@zaylan.test"
-    assert response.data["invitation_email_sent"] is True
-    assert len(mail.outbox) == 1
+    assert response.data["portal_url"].endswith("/b/zaylan-brand")
+    assert response.data["brand_admin_email"] == "admin@zaylan.test"
+    assert response.data["tenant"]["contact_email"] == "admin@zaylan.test"
+    assert "owner_invitation_url" not in response.data
+
+
+@pytest.mark.django_db
+def test_platform_auto_slug_from_name_and_unique_suffix():
+    admin = platform_admin()
+    client = api_client(admin)
+    first = client.post(
+        "/api/v1/platform/tenants",
+        {
+            "name": "Bariq Mens Fashions",
+            "industry": "RETAIL",
+            "plan_code": "growth",
+            "owner_email": "owner1@bariq.test",
+            "owner_password": "AdminPass1",
+        },
+        format="json",
+    )
+    assert first.status_code == 201, first.data
+    assert first.data["tenant"]["slug"] == "bariq-fashions"
+    assert first.data["portal_url"].endswith("/b/bariq-fashions")
+
+    second = client.post(
+        "/api/v1/platform/tenants",
+        {
+            "name": "Bariq Mens Premium Fashions",
+            "industry": "RETAIL",
+            "plan_code": "growth",
+            "owner_email": "owner2@bariq.test",
+            "owner_password": "AdminPass1",
+        },
+        format="json",
+    )
+    assert second.status_code == 201, second.data
+    # Same first+last as the 3-word name → unique suffix
+    assert second.data["tenant"]["slug"] == "bariq-fashions-2"
+    assert second.data["portal_url"].endswith("/b/bariq-fashions-2")
 
 
 @pytest.mark.django_db

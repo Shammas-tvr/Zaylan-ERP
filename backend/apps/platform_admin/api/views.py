@@ -16,7 +16,6 @@ from apps.branches.models import Branch
 from apps.subscriptions.models import Feature, OrganizationSubscription, Plan, PlanEntitlement
 from apps.subscriptions.services import change_subscription
 from apps.tenancy.models import MembershipStatus, Organization, OrganizationMembership
-from apps.tenancy.services.invitations import invitation_url
 from apps.tenancy.services.organizations import change_organization_status, onboard_organization
 
 from .serializers import (
@@ -59,10 +58,10 @@ class TenantViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, PlatformVi
         serializer = TenantOnboardSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        organization, raw_token = onboard_organization(
+        organization = onboard_organization(
             actor=request.user,
             name=data["name"],
-            slug=data["slug"],
+            slug=(data.get("slug") or "").strip(),
             industry=data["industry"],
             currency=data["currency"],
             timezone_name=data["timezone"],
@@ -70,26 +69,19 @@ class TenantViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, PlatformVi
             locale=data["locale"],
             plan=data["plan_code"],
             owner_email=data["owner_email"],
+            owner_password=data["owner_password"],
+            owner_full_name=data.get("owner_full_name", ""),
             legal_name=data.get("legal_name", ""),
-            contact_email=data.get("contact_email", ""),
+            contact_email=data["owner_email"],
             contact_phone=data.get("contact_phone", ""),
             request=request,
-        )
-        invite_link = invitation_url(raw_token)
-        from apps.notifications.services import deliver_invitation
-
-        email_sent = deliver_invitation(
-            organization_name=organization.name,
-            email=data["owner_email"],
-            invite_url=invite_link,
-            is_owner=True,
         )
         organization = self.get_queryset().get(pk=organization.pk)
         return Response(
             {
                 "tenant": TenantSerializer(organization).data,
-                "owner_invitation_url": invite_link,
-                "invitation_email_sent": email_sent,
+                "brand_admin_email": data["owner_email"],
+                "portal_url": organization.portal_url,
             },
             status=status.HTTP_201_CREATED,
         )

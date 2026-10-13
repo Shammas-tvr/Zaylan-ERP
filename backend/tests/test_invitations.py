@@ -73,15 +73,13 @@ class TestInvitations:
         assert raw not in invitation.token_hash
         assert invitation.status == InvitationStatus.PENDING
 
-    def test_owner_accepts_and_gets_session(self, client, tenant):
-        response = client.post(
-            "/api/v1/auth/invitations/accept",
-            {"token": tenant["token"], "full_name": "Owner", "password": PASSWORD},
-            format="json",
-            HTTP_ORIGIN=ORIGIN,
-        )
+    def test_brand_admin_login_gets_session(self, client, tenant):
+        """Brand Admin is created at onboard (no invite token); email login opens the brand."""
+        from tests.factories import login
+
+        response = login(client, tenant["owner_email"])
         assert response.status_code == 200
-        assert response.data["organization_id"] == str(tenant["organization"].pk)
+        assert response.data["user"]["email"] == tenant["owner_email"]
         assert "zaylan_refresh" in response.cookies
         auth = api_client()
         auth.credentials(

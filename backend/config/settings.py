@@ -77,7 +77,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-        "OPTIONS": {"min_length": 10},
+        "OPTIONS": {"min_length": 6},
     },
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
@@ -128,6 +128,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "auth_login": env("THROTTLE_AUTH_LOGIN", default="10/min"),
         "auth_refresh": env("THROTTLE_AUTH_REFRESH", default="60/min"),
+        "auth_password_reset": env("THROTTLE_AUTH_PASSWORD_RESET", default="5/min"),
         "invitation": env("THROTTLE_INVITATION", default="20/min"),
     },
 }
