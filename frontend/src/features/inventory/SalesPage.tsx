@@ -48,6 +48,7 @@ export function SalesPage() {
     },
   })
   if (!context) return null
+  if (can(context.permissions, 'branches.manage')) return <NoAccess />
   if (!can(context.permissions, 'sales.view') && !can(context.permissions, 'pos.sell')) return <NoAccess />
 
   return (

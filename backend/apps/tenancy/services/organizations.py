@@ -161,6 +161,9 @@ def onboard_organization(
     from apps.notifications.services import ensure_brand_notification_settings
 
     ensure_brand_notification_settings(organization)
+    from apps.inventory.services import ensure_brand_locations
+
+    ensure_brand_locations(organization)
     roles = sync_system_roles(organization)
     start_subscription(organization, plan)
 

@@ -9,7 +9,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from apps.audit_logs.services import record_event
 from apps.catalog.models import ConsumeAt, Item
 from apps.catalog.services import effective_recipe
-from apps.catalog.units import to_base
+from apps.catalog.units import quantity_in_base, to_base
 from apps.core.exceptions import BusinessRuleViolation
 from apps.notifications.models import NotificationType
 from apps.notifications.services import (
@@ -57,6 +57,15 @@ def ensure_branch_location(branch) -> InventoryLocation:
         location.name = branch.name
         location.save(update_fields=["name", "updated_at"])
     return location
+
+
+def ensure_org_locations(organization):
+    """Kitchen, in-transit, and one location per branch. Safe to call on every inventory read."""
+    ensure_brand_locations(organization)
+    from apps.branches.models import Branch
+
+    for branch in Branch.objects.filter(organization=organization):
+        ensure_branch_location(branch)
 
 
 def _lock_balance(organization, location, item) -> StockBalance:
@@ -130,7 +139,9 @@ def _scale(recipe, output_quantity: Decimal) -> Decimal:
 def _consume_lines(ctx, *, recipe, location, scale: Decimal, consume_at: str, reference_type, reference_id, reason):
     lines = recipe.lines.filter(consume_at=consume_at).select_related("ingredient")
     for line in lines:
-        base_qty = to_base(line.quantity, line.unit, line.ingredient.base_unit) * scale
+        if not line.ingredient.tracks_stock:
+            continue
+        base_qty = quantity_in_base(line.quantity, line.unit, line.ingredient) * scale
         post_movement(
             ctx=ctx,
             location=location,
@@ -207,28 +218,29 @@ def complete_production(ctx, order: ProductionOrder, data: dict, *, request=None
         reference_id=order.pk,
         reason=MovementReason.PRODUCTION_CONSUME,
     )
-    output_base = to_base(actual, recipe.output_item.base_unit, recipe.output_item.base_unit)
-    post_movement(
-        ctx=ctx,
-        location=order.location,
-        item=recipe.output_item,
-        quantity=output_base,
-        reason=MovementReason.PRODUCTION_OUTPUT,
-        reference_type="production",
-        reference_id=order.pk,
-        idempotency_key=f"production:{order.pk}:output",
-    )
-    if waste > 0:
+    if recipe.output_item.tracks_stock:
+        output_base = to_base(actual, recipe.output_item.base_unit, recipe.output_item.base_unit)
         post_movement(
             ctx=ctx,
             location=order.location,
             item=recipe.output_item,
-            quantity=-to_base(waste, recipe.output_item.base_unit, recipe.output_item.base_unit),
-            reason=MovementReason.PRODUCTION_WASTE,
+            quantity=output_base,
+            reason=MovementReason.PRODUCTION_OUTPUT,
             reference_type="production",
             reference_id=order.pk,
-            idempotency_key=f"production:{order.pk}:waste",
+            idempotency_key=f"production:{order.pk}:output",
         )
+        if waste > 0:
+            post_movement(
+                ctx=ctx,
+                location=order.location,
+                item=recipe.output_item,
+                quantity=-to_base(waste, recipe.output_item.base_unit, recipe.output_item.base_unit),
+                reason=MovementReason.PRODUCTION_WASTE,
+                reference_type="production",
+                reference_id=order.pk,
+                idempotency_key=f"production:{order.pk}:waste",
+            )
     order.actual_quantity = actual
     order.waste_quantity = waste
     order.status = ProductionStatus.COMPLETED
@@ -262,13 +274,24 @@ def create_transfer(ctx, data: dict, *, request=None) -> StockTransfer:
     if branch is None:
         raise ValidationError({"branch_id": ["Unknown branch."]})
     destination = ensure_branch_location(branch)
+    source_id = data.get("source_location_id")
+    if source_id:
+        source = InventoryLocation.objects.filter(
+            organization=ctx.organization, pk=source_id
+        ).exclude(kind=LocationKind.IN_TRANSIT).first()
+        if source is None:
+            raise ValidationError({"source_location_id": ["Unknown source location."]})
+    else:
+        source = kitchen
+    if source.pk == destination.pk:
+        raise ValidationError({"source_location_id": ["Source and destination must be different."]})
     lines = data["lines"]
     if not lines:
         raise ValidationError({"lines": ["Add at least one item."]})
     transfer = StockTransfer.objects.create(
         organization=ctx.organization,
         number=_next_transfer_number(ctx.organization),
-        source_location=kitchen,
+        source_location=source,
         destination_location=destination,
         status=TransferStatus.DRAFT,
     )
@@ -277,7 +300,9 @@ def create_transfer(ctx, data: dict, *, request=None) -> StockTransfer:
         item = Item.objects.filter(organization=ctx.organization, pk=line["item_id"]).first()
         if item is None:
             raise ValidationError({"lines": ["Unknown item."]})
-        to_base(line["quantity"], line["unit"], item.base_unit)
+        if not item.tracks_stock:
+            raise ValidationError({"lines": [f"{item.name} does not track stock."]})
+        quantity_in_base(line["quantity"], line["unit"], item)
         created.append(
             StockTransferLine(
                 transfer=transfer,
@@ -337,7 +362,7 @@ def dispatch_transfer(ctx, transfer: StockTransfer, *, request=None) -> StockTra
         qty = line.requested_quantity
         line.dispatched_quantity = qty
         line.save(update_fields=["dispatched_quantity", "updated_at"])
-        base_qty = to_base(qty, line.unit, line.item.base_unit)
+        base_qty = quantity_in_base(qty, line.unit, line.item)
         post_movement(
             ctx=ctx,
             location=transfer.source_location,
@@ -422,7 +447,7 @@ def receive_transfer(ctx, transfer: StockTransfer, data: dict, *, request=None) 
         if received != line.dispatched_quantity:
             short = True
         if received > 0:
-            base_qty = to_base(received, line.unit, line.item.base_unit)
+            base_qty = quantity_in_base(received, line.unit, line.item)
             post_movement(
                 ctx=ctx,
                 location=transit,
@@ -526,7 +551,9 @@ def adjust_stock(ctx, data: dict, *, request=None) -> StockMovement:
     item = Item.objects.filter(organization=ctx.organization, pk=data["item_id"]).first()
     if location is None or item is None:
         raise ValidationError({"location_id": ["Unknown location or item."]})
-    signed = to_base(abs(Decimal(data["quantity"])), data["unit"], item.base_unit)
+    if not item.tracks_stock:
+        raise ValidationError({"item_id": ["Turn on stock tracking for this item before changing its quantity."]})
+    signed = quantity_in_base(abs(Decimal(data["quantity"])), data["unit"], item)
     if data["direction"] == "out":
         signed = -signed
     before = (
@@ -563,20 +590,38 @@ def adjust_stock(ctx, data: dict, *, request=None) -> StockMovement:
 
 
 def sale_deductions(ctx, *, sale, location, lines):
-    """Deduct SALE recipe lines once for a completed sale. Caller holds the transaction."""
+    """Deduct a sale once.
+
+    Lines marked for sale are made to order and consume ingredients.
+    A recipe with no sale lines was produced in advance, so the sale takes the finished item.
+    The same ingredients are never consumed in both places.
+    """
     for line in lines:
         recipe = effective_recipe(ctx.organization, line["item"])
         scale = _scale(recipe, Decimal(line["quantity"]))
-        _consume_lines(
-            ctx,
-            recipe=recipe,
-            location=location,
-            scale=scale,
-            consume_at=ConsumeAt.SALE,
-            reference_type="sale",
-            reference_id=sale.pk,
-            reason=MovementReason.SALE,
-        )
+        made_to_order = recipe.lines.filter(consume_at=ConsumeAt.SALE).exists()
+        if made_to_order:
+            _consume_lines(
+                ctx,
+                recipe=recipe,
+                location=location,
+                scale=scale,
+                consume_at=ConsumeAt.SALE,
+                reference_type="sale",
+                reference_id=sale.pk,
+                reason=MovementReason.SALE,
+            )
+        elif line["item"].tracks_stock:
+            post_movement(
+                ctx=ctx,
+                location=location,
+                item=line["item"],
+                quantity=-quantity_in_base(line["quantity"], line["item"].base_unit, line["item"]),
+                reason=MovementReason.SALE,
+                reference_type="sale",
+                reference_id=sale.pk,
+                idempotency_key=f"sale:{sale.pk}:item:{line['item'].pk}",
+            )
         line["recipe"] = recipe
     return lines
 

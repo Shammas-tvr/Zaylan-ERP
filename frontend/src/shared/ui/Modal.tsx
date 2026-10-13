@@ -5,11 +5,13 @@ export function Modal({
   open,
   title,
   onClose,
+  wide = false,
   children,
 }: {
   open: boolean
   title: string
   onClose: () => void
+  wide?: boolean
   children: ReactNode
 }) {
   const titleId = useId()
@@ -31,7 +33,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="max-h-[90svh] w-full max-w-lg overflow-y-auto rounded-3xl bg-[var(--brand-surface)] p-6 shadow-card"
+        className={`max-h-[90svh] w-full overflow-y-auto rounded-3xl bg-[var(--brand-surface)] p-6 shadow-card ${wide ? 'max-w-2xl' : 'max-w-lg'}`}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="mb-5 flex items-start justify-between gap-4">

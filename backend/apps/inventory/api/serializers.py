@@ -18,7 +18,12 @@ class LocationSerializer(serializers.ModelSerializer):
 class BalanceSerializer(serializers.ModelSerializer):
     item_name = serializers.CharField(source="item.name")
     item_sku = serializers.CharField(source="item.sku")
+    item_kind = serializers.CharField(source="item.kind")
+    category = serializers.CharField(source="item.category")
     base_unit = serializers.CharField(source="item.base_unit")
+    stock_unit = serializers.CharField(source="item.stock_unit")
+    minimum_stock = serializers.DecimalField(source="item.minimum_stock", max_digits=14, decimal_places=3)
+    expiry_date = serializers.DateField(source="item.expiry_date", allow_null=True)
     location_name = serializers.CharField(source="location.name")
     location_kind = serializers.CharField(source="location.kind")
 
@@ -32,7 +37,12 @@ class BalanceSerializer(serializers.ModelSerializer):
             "item",
             "item_name",
             "item_sku",
+            "item_kind",
+            "category",
             "base_unit",
+            "stock_unit",
+            "minimum_stock",
+            "expiry_date",
             "quantity",
         )
 
@@ -89,6 +99,7 @@ class TransferLineSerializer(serializers.ModelSerializer):
 class TransferSerializer(serializers.ModelSerializer):
     lines = TransferLineSerializer(many=True, read_only=True)
     destination_name = serializers.CharField(source="destination_location.name", read_only=True)
+    source_name = serializers.CharField(source="source_location.name", read_only=True)
     branch_id = serializers.UUIDField(source="destination_location.branch_id", read_only=True)
 
     class Meta:
@@ -98,6 +109,7 @@ class TransferSerializer(serializers.ModelSerializer):
             "number",
             "status",
             "destination_name",
+            "source_name",
             "branch_id",
             "dispatched_at",
             "received_at",
@@ -109,11 +121,12 @@ class TransferSerializer(serializers.ModelSerializer):
 class TransferLineWriteSerializer(serializers.Serializer):
     item_id = serializers.UUIDField()
     quantity = serializers.DecimalField(max_digits=14, decimal_places=3)
-    unit = serializers.ChoiceField(choices=["G", "KG", "ML", "L", "EACH"])
+    unit = serializers.ChoiceField(choices=["G", "KG", "ML", "L", "EACH", "BOX"])
 
 
 class TransferWriteSerializer(serializers.Serializer):
     branch_id = serializers.UUIDField()
+    source_location_id = serializers.UUIDField(required=False)
     lines = TransferLineWriteSerializer(many=True)
 
 
@@ -127,11 +140,24 @@ class ReceiveSerializer(serializers.Serializer):
     lines = ReceiveLineSerializer(many=True)
 
 
+class MovementSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    created_at = serializers.DateTimeField()
+    item_name = serializers.CharField(source="item.name")
+    item_sku = serializers.CharField(source="item.sku")
+    location_name = serializers.CharField(source="location.name")
+    quantity = serializers.DecimalField(max_digits=14, decimal_places=3)
+    base_unit = serializers.CharField(source="item.base_unit")
+    stock_unit = serializers.CharField(source="item.stock_unit")
+    reason = serializers.CharField()
+    note = serializers.CharField()
+
+
 class AdjustmentSerializer(serializers.Serializer):
     location_id = serializers.UUIDField()
     item_id = serializers.UUIDField()
     quantity = serializers.DecimalField(max_digits=14, decimal_places=3)
-    unit = serializers.ChoiceField(choices=["G", "KG", "ML", "L", "EACH"])
+    unit = serializers.ChoiceField(choices=["G", "KG", "ML", "L", "EACH", "BOX"])
     direction = serializers.ChoiceField(choices=["in", "out"])
     reason = serializers.ChoiceField(choices=["WASTAGE", "EXPIRY", "ADJUSTMENT"])
     note = serializers.CharField(required=False, allow_blank=True, max_length=500)

@@ -7,7 +7,10 @@ import { LoginPage } from '../features/auth/LoginPage.tsx'
 import { SuperAdminLoginPage } from '../features/auth/SuperAdminLoginPage.tsx'
 import { AuditPage } from '../features/audit/AuditPage.tsx'
 import { BranchesPage } from '../features/branches/BranchesPage.tsx'
+import { InventoryTabs } from '../features/inventory/InventoryTabs.tsx'
 import { InventoryPage } from '../features/inventory/InventoryPage.tsx'
+import { RecipesPage } from '../features/inventory/RecipesPage.tsx'
+import { StockPage } from '../features/inventory/StockPage.tsx'
 import { ProductionPage } from '../features/inventory/ProductionPage.tsx'
 import { ProductsPage } from '../features/inventory/ProductsPage.tsx'
 import { SalesPage } from '../features/inventory/SalesPage.tsx'
@@ -46,10 +49,18 @@ const router = createBrowserRouter([
             children: [
               { index: true, element: <OverviewPage /> },
               { path: 'branches', element: <BranchesPage /> },
+              { 
+                path: 'inventory',
+                element: <InventoryTabs />,
+                children: [
+                  { index: true, element: <InventoryPage /> },
+                  { path: 'recipes', element: <RecipesPage /> },
+                  { path: 'production', element: <ProductionPage /> },
+                  { path: 'transfers', element: <TransfersPage /> },
+                  { path: 'stock', element: <StockPage /> },
+                ],
+              },
               { path: 'products', element: <ProductsPage /> },
-              { path: 'production', element: <ProductionPage /> },
-              { path: 'inventory', element: <InventoryPage /> },
-              { path: 'transfers', element: <TransfersPage /> },
               { path: 'sales', element: <SalesPage /> },
               { path: 'expenses', element: <ExpensesPage /> },
               { path: 'expenses/approvals', element: <ApprovalsPage /> },

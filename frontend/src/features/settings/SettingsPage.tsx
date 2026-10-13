@@ -7,6 +7,7 @@ import {
   useWorkspace,
 } from '../workspace/queries.ts'
 import type { Branding, NotificationSettings, Organization } from '../../shared/api/types.ts'
+import { defaultBranding } from '../../shared/brand.ts'
 import { errorMessage } from '../../shared/api/errors.ts'
 import { usePageTitle } from '../../shared/hooks.ts'
 import { industryLabel } from '../../shared/labels.ts'
@@ -114,9 +115,27 @@ function SettingsForm({
           <ColorField label="Text" disabled={!canManage} value={brand.text_color} onChange={(value) => setBrand({ ...brand, text_color: value })} />
           {saveBrand.isError ? <p className="text-sm text-danger sm:col-span-2">{errorMessage(saveBrand.error)}</p> : null}
           {canManage ? (
-            <div className="sm:col-span-2">
+            <div className="flex flex-wrap gap-2 sm:col-span-2">
               <Button type="submit" disabled={saveBrand.isPending}>
                 {saveBrand.isPending ? 'Saving…' : 'Save branding'}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={saveBrand.isPending}
+                onClick={() => {
+                  const next = {
+                    ...brand,
+                    primary_color: defaultBranding.primary_color,
+                    secondary_color: defaultBranding.secondary_color,
+                    background_color: defaultBranding.background_color,
+                    surface_color: defaultBranding.surface_color,
+                    text_color: defaultBranding.text_color,
+                  }
+                  setBrand(next)
+                  saveBrand.mutate(next, { onSuccess: () => setNotice('Colors are back to the Zaylan defaults.') })
+                }}
+              >
+                Use default colors
               </Button>
             </div>
           ) : null}

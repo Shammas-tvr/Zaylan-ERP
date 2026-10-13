@@ -17,6 +17,32 @@ FACTORS = {
 QUANTUM = Decimal("0.001")
 
 
+def stock_factor(stock_unit: str) -> Decimal:
+    """How many ledger base units are in one of the item's stock units."""
+    unit = (stock_unit or "").upper()
+    if unit == "BOX":
+        return Decimal("1")
+    if unit not in FACTORS:
+        raise ValidationError({"unit": ["Unknown unit."]})
+    return FACTORS[unit]
+
+
+def quantity_in_base(quantity, unit: str, item) -> Decimal:
+    """Convert a counted quantity into the item's ledger unit (G, ML, or EACH)."""
+    unit = (unit or "").upper()
+    if unit == "BOX":
+        per_stock = Decimal(item.purchase_factor or 1)
+        if (item.purchase_unit or "").upper() != "BOX":
+            per_stock = Decimal("1")
+        value = (Decimal(quantity) * per_stock * stock_factor(item.stock_unit or item.base_unit)).quantize(
+            QUANTUM, rounding=ROUND_HALF_UP
+        )
+        if value <= 0:
+            raise ValidationError({"quantity": ["Quantity must be greater than zero."]})
+        return value
+    return to_base(quantity, unit, item.base_unit)
+
+
 def to_base(quantity, unit: str, base_unit: str) -> Decimal:
     unit = (unit or "").upper()
     base_unit = (base_unit or "").upper()

@@ -22,6 +22,20 @@ class ConsumeAt(models.TextChoices):
     SALE = "SALE", "When sold"
 
 
+class CostingMethod(models.TextChoices):
+    MOVING_AVERAGE = "MOVING_AVERAGE", "Moving weighted average"
+    FIFO = "FIFO", "FIFO"
+
+
+class StockUnit(models.TextChoices):
+    G = "G", "Gram"
+    KG = "KG", "Kilogram"
+    ML = "ML", "Millilitre"
+    L = "L", "Litre"
+    EACH = "EACH", "Piece"
+    BOX = "BOX", "Box"
+
+
 class Item(TimeStampedModel):
     organization = models.ForeignKey(
         "tenancy.Organization", on_delete=models.PROTECT, related_name="items"
@@ -29,7 +43,28 @@ class Item(TimeStampedModel):
     sku = models.CharField(max_length=32)
     name = models.CharField(max_length=150)
     kind = models.CharField(max_length=16, choices=ItemKind.choices)
+    category = models.CharField(max_length=80, blank=True)
     base_unit = models.CharField(max_length=8, choices=BaseUnit.choices)
+    stock_unit = models.CharField(max_length=8, choices=StockUnit.choices, default=StockUnit.G)
+    purchase_unit = models.CharField(max_length=8, choices=StockUnit.choices, blank=True)
+    purchase_factor = models.DecimalField(max_digits=14, decimal_places=3, default=1)
+    supplier_name = models.CharField(max_length=150, blank=True)
+    costing_method = models.CharField(
+        max_length=24, choices=CostingMethod.choices, default=CostingMethod.MOVING_AVERAGE
+    )
+    standard_cost = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    minimum_stock = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    storage_location = models.ForeignKey(
+        "inventory.InventoryLocation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stored_items",
+    )
+    tracks_batch = models.BooleanField(default=False)
+    tracks_expiry = models.BooleanField(default=False)
+    expiry_date = models.DateField(null=True, blank=True)
+    tracks_stock = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -53,6 +88,14 @@ class Recipe(TimeStampedModel):
     version = models.PositiveIntegerField()
     effective_from = models.DateField()
     yield_quantity = models.DecimalField(max_digits=14, decimal_places=3, default=1)
+    expected_waste_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    product = models.ForeignKey(
+        "Product",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recipes",
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -77,3 +120,37 @@ class RecipeLine(TimeStampedModel):
 
     class Meta:
         ordering = ["consume_at", "created_at"]
+
+
+class Product(TimeStampedModel):
+    """What the brand sells. Stock and the recipe stay on the linked inventory item."""
+
+    organization = models.ForeignKey(
+        "tenancy.Organization", on_delete=models.PROTECT, related_name="products"
+    )
+    sku = models.CharField(max_length=32)
+    name = models.CharField(max_length=150)
+    category = models.CharField(max_length=80, blank=True)
+    selling_price = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    sale_unit = models.CharField(max_length=8, choices=StockUnit.choices, default=StockUnit.EACH)
+    kind = models.CharField(max_length=16, choices=ItemKind.choices, default=ItemKind.FINISHED)
+    inventory_item = models.ForeignKey(
+        Item,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="products",
+    )
+    is_active = models.BooleanField(default=True)
+    branches = models.ManyToManyField("branches.Branch", blank=True, related_name="products")
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                "organization", Upper("sku"), name="catalog_product_org_sku_unique"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name

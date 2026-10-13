@@ -3,7 +3,10 @@ from decimal import Decimal
 
 import pytest
 from apps.catalog.services import create_item, create_recipe
-from apps.inventory.models import LocationKind, StockBalance, TransferStatus
+from rest_framework.exceptions import ValidationError
+
+from apps.core.exceptions import BusinessRuleViolation
+from apps.inventory.models import LocationKind, StockBalance, StockMovement, TransferStatus
 from apps.inventory.services import (
     adjust_stock,
     approve_transfer,
@@ -11,6 +14,7 @@ from apps.inventory.services import (
     create_production,
     create_transfer,
     dispatch_transfer,
+    ensure_branch_location,
     receive_transfer,
 )
 from apps.sales.services import record_sale, reverse_sale
@@ -175,3 +179,158 @@ def test_branch_login_cannot_approve_or_open_another_brand(owner):
     other = accept_owner(create_tenant(slug="otherbrand", name="Other"))
     foreign = api_client(branch.login_user, organization=other["organization"])
     assert foreign.get("/api/v1/inventory/balances").status_code == 403
+
+
+@pytest.mark.django_db
+def test_preproduced_sale_deducts_finished_stock_once(owner):
+    ctx = tenant_ctx(owner["user"], owner["organization"])
+    branch = add_branch(ctx, "CK", "Creek")
+    flour = _item(ctx, "CAKE-FLOUR", "Cake flour", "RAW")
+    cake = _item(ctx, "CAKE", "Butter cake", "FINISHED", "EACH")
+    recipe = create_recipe(
+        ctx,
+        {
+            "output_item_id": cake.pk,
+            "effective_from": date.today(),
+            "yield_quantity": 1,
+            "lines": [
+                {"ingredient_id": flour.pk, "quantity": 50, "unit": "G", "consume_at": "PRODUCTION"}
+            ],
+        },
+    )
+    kitchen = branch.organization.inventory_locations.get(kind=LocationKind.CENTRAL_KITCHEN)
+    adjust_stock(
+        ctx,
+        {
+            "location_id": kitchen.pk,
+            "item_id": flour.pk,
+            "quantity": 1000,
+            "unit": "G",
+            "direction": "in",
+            "reason": "ADJUSTMENT",
+            "note": "Opening flour",
+        },
+    )
+    order = create_production(ctx, {"recipe_id": recipe.pk, "planned_quantity": 10})
+    complete_production(ctx, order, {"actual_quantity": 10, "waste_quantity": 0})
+    with pytest.raises(BusinessRuleViolation):
+        complete_production(ctx, order, {"actual_quantity": 10, "waste_quantity": 0})
+    assert _stock(LocationKind.CENTRAL_KITCHEN, flour) == Decimal("500.000")
+    assert _stock(LocationKind.CENTRAL_KITCHEN, cake) == Decimal("10.000")
+
+    transfer = create_transfer(
+        ctx,
+        {"branch_id": branch.pk, "lines": [{"item_id": cake.pk, "quantity": 10, "unit": "EACH"}]},
+    )
+    transfer = dispatch_transfer(ctx, approve_transfer(ctx, transfer))
+    line = transfer.lines.get()
+    receive_transfer(
+        ctx,
+        transfer,
+        {"lines": [{"line_id": line.pk, "received_quantity": 10, "note": ""}]},
+    )
+    payload = {
+        "branch_id": branch.pk,
+        "idempotency_key": "sale-cake-3",
+        "lines": [{"item_id": cake.pk, "quantity": 3}],
+    }
+    sale = record_sale(ctx, payload)
+    assert record_sale(ctx, payload).pk == sale.pk
+    assert _stock(LocationKind.BRANCH, cake, branch) == Decimal("7.000")
+    assert _stock(LocationKind.CENTRAL_KITCHEN, flour) == Decimal("500.000")
+    assert not StockMovement.objects.filter(
+        item=flour, reference_type="sale", reference_id=sale.pk
+    ).exists()
+
+    with pytest.raises(BusinessRuleViolation):
+        record_sale(
+            ctx,
+            {
+                "branch_id": branch.pk,
+                "idempotency_key": "sale-cake-too-many",
+                "lines": [{"item_id": cake.pk, "quantity": 20}],
+            },
+        )
+    assert _stock(LocationKind.BRANCH, cake, branch) == Decimal("7.000")
+
+    reverse_sale(ctx, sale, status=SaleStatus.REFUNDED)
+    assert _stock(LocationKind.BRANCH, cake, branch) == Decimal("10.000")
+    assert _stock(LocationKind.CENTRAL_KITCHEN, flour) == Decimal("500.000")
+
+
+@pytest.mark.django_db
+def test_transfer_source_must_differ_and_untracked_items_stay_out_of_the_ledger(owner):
+    ctx = tenant_ctx(owner["user"], owner["organization"])
+    branch = add_branch(ctx, "NT", "North")
+    label = create_item(
+        ctx,
+        {"sku": "LABEL", "name": "Box label", "kind": "PACKAGING", "base_unit": "EACH", "tracks_stock": False},
+    )
+    cake = _item(ctx, "LOAF", "Loaf", "FINISHED", "EACH")
+    recipe = create_recipe(
+        ctx,
+        {
+            "output_item_id": cake.pk,
+            "effective_from": date.today(),
+            "yield_quantity": 1,
+            "lines": [
+                {"ingredient_id": label.pk, "quantity": 1, "unit": "EACH", "consume_at": "PRODUCTION"}
+            ],
+        },
+    )
+    order = create_production(ctx, {"recipe_id": recipe.pk, "planned_quantity": 4})
+    complete_production(ctx, order, {"actual_quantity": 4, "waste_quantity": 1})
+    assert _stock(LocationKind.CENTRAL_KITCHEN, cake) == Decimal("3.000")
+    assert not StockBalance.objects.filter(item=label).exists()
+
+    with pytest.raises(ValidationError):
+        adjust_stock(
+            ctx,
+            {
+                "location_id": cake.organization.inventory_locations.get(kind=LocationKind.CENTRAL_KITCHEN).pk,
+                "item_id": label.pk,
+                "quantity": 1,
+                "unit": "EACH",
+                "direction": "in",
+                "reason": "ADJUSTMENT",
+                "note": "Should fail",
+            },
+        )
+    destination = ensure_branch_location(branch)
+    with pytest.raises(ValidationError):
+        create_transfer(
+            ctx,
+            {
+                "branch_id": branch.pk,
+                "source_location_id": destination.pk,
+                "lines": [{"item_id": cake.pk, "quantity": 1, "unit": "EACH"}],
+            },
+        )
+    with pytest.raises(ValidationError):
+        create_transfer(
+            ctx,
+            {
+                "branch_id": branch.pk,
+                "lines": [{"item_id": label.pk, "quantity": 1, "unit": "EACH"}],
+            },
+        )
+
+
+@pytest.mark.django_db
+def test_branch_login_cannot_dispatch_transfer(owner):
+    ctx = tenant_ctx(owner["user"], owner["organization"])
+    branch = add_branch(ctx, "DS", "Desk")
+    from apps.branches.services import update_branch
+
+    update_branch(ctx, branch, {"login_username": "desklogin", "login_password": PASSWORD})
+    branch.refresh_from_db()
+    cake = _item(ctx, "SLICE", "Slice", "FINISHED", "EACH")
+    transfer = create_transfer(
+        ctx,
+        {"branch_id": branch.pk, "lines": [{"item_id": cake.pk, "quantity": 1, "unit": "EACH"}]},
+    )
+    client = api_client(branch.login_user, organization=owner["organization"])
+    denied = client.post(f"/api/v1/inventory/transfers/{transfer.pk}/dispatch/", format="json")
+    assert denied.status_code == 403
+    transfer.refresh_from_db()
+    assert transfer.status == TransferStatus.DRAFT

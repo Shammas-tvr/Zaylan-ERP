@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { 
+  Home, Building2, Package, ShoppingBag, CreditCard, Receipt, 
+  Users, Settings, FileText, CheckCircle, Repeat, BarChart3
+} from 'lucide-react'
 import { logout } from '../shared/api/workspace.ts'
 import { queryClient } from '../shared/api/queryClient.ts'
 import { brandVars, defaultBranding } from '../shared/brand.ts'
@@ -35,6 +39,21 @@ export function WorkspaceLayout() {
     canPlatform(me.data?.platform_permissions, item.permission),
   )
   const hasOrganization = Boolean(session.organizationId)
+
+  const navIcons: Record<string, any> = {
+    '/': Home,
+    '/branches': Building2,
+    '/inventory': Package,
+    '/products': ShoppingBag,
+    '/sales': CreditCard,
+    '/expenses': Receipt,
+    '/expenses/approvals': CheckCircle,
+    '/expenses/recurring': Repeat,
+    '/expenses/reports': BarChart3,
+    '/people': Users,
+    '/settings': Settings,
+    '/audit': FileText,
+  }
 
   useEffect(() => {
     if (!session.organizationId && organizations.data && organizations.data.length > 0) {
@@ -103,25 +122,33 @@ export function WorkspaceLayout() {
             {hasOrganization ? (
               <nav className="grid gap-1" aria-label="Workspace">
                 {workspaceNav
-                  .filter((item) => item.permission === null || can(permissions, item.permission))
-                  .map((item) => (
-                    <NavLink
-                      key={item.to}
-                      to={item.to}
-                      end={item.end}
-                      onClick={() => setNavOpen(false)}
-                      className={({ isActive }) =>
-                        cn(
-                          'rounded-xl border-l-2 px-3 py-2.5 text-sm',
-                          isActive
-                            ? 'border-[var(--brand-primary)] bg-cream font-medium text-[var(--brand-primary)]'
-                            : 'border-transparent text-ink hover:bg-cream',
-                        )
-                      }
-                    >
-                      {item.label}
-                    </NavLink>
-                  ))}
+                  .filter((item) => {
+                    if (item.permission !== null && !can(permissions, item.permission)) return false
+                    if ('branchOnly' in item && item.branchOnly && can(permissions, 'branches.manage')) return false
+                    return true
+                  })
+                  .map((item) => {
+                    const Icon = navIcons[item.to]
+                    return (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        end={item.end}
+                        onClick={() => setNavOpen(false)}
+                        className={({ isActive }) =>
+                          cn(
+                            'flex items-center gap-2.5 rounded-xl border-l-2 px-3 py-2.5 text-sm',
+                            isActive
+                              ? 'border-[var(--brand-primary)] bg-cream font-medium text-[var(--brand-primary)]'
+                              : 'border-transparent text-ink hover:bg-cream',
+                          )
+                        }
+                      >
+                        {Icon ? <Icon className="h-4 w-4 shrink-0" /> : null}
+                        {item.label}
+                      </NavLink>
+                    )
+                  })}
               </nav>
             ) : null}
             {hasPlatformAccess ? (

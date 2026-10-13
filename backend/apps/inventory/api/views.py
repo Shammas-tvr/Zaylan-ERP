@@ -5,11 +5,12 @@ from rest_framework.response import Response
 from apps.tenancy.api.base import TenantAPIView, TenantScopedViewSet
 
 from .. import services
-from ..models import ProductionOrder, StockBalance, StockTransfer
+from ..models import ProductionOrder, StockBalance, StockMovement, StockTransfer
 from .serializers import (
     AdjustmentSerializer,
     BalanceSerializer,
     LocationSerializer,
+    MovementSerializer,
     ProductionCompleteSerializer,
     ProductionSerializer,
     ProductionWriteSerializer,
@@ -27,6 +28,7 @@ class LocationView(TenantAPIView):
     def get(self, request):
         if not request.tenant.has_permission_anywhere("inventory.view"):
             self.permission_denied(request)
+        services.ensure_org_locations(request.tenant.organization)
         rows = services.visible_locations(request.tenant).order_by("name")
         return Response(LocationSerializer(rows, many=True).data)
 
@@ -48,6 +50,39 @@ class BalanceView(TenantAPIView):
             .order_by("location__name", "item__name")
         )
         return Response(BalanceSerializer(rows, many=True).data)
+
+
+class MovementView(TenantAPIView):
+    required_feature = "inventory"
+    permission_rules = {"get": "inventory.view"}
+    branch_scoped_actions = ("get",)
+
+    def get(self, request):
+        if not request.tenant.has_permission_anywhere("inventory.view"):
+            self.permission_denied(request)
+        locations = services.visible_locations(request.tenant)
+        rows = StockMovement.objects.filter(
+            organization=request.tenant.organization, location__in=locations
+        ).select_related("item", "location")
+        location_id = request.query_params.get("location")
+        reason = request.query_params.get("reason")
+        kind = request.query_params.get("kind")
+        category = request.query_params.get("category")
+        date_from = request.query_params.get("from")
+        date_to = request.query_params.get("to")
+        if location_id:
+            rows = rows.filter(location_id=location_id)
+        if reason:
+            rows = rows.filter(reason=reason)
+        if kind:
+            rows = rows.filter(item__kind=kind)
+        if category:
+            rows = rows.filter(item__category__iexact=category)
+        if date_from:
+            rows = rows.filter(created_at__date__gte=date_from)
+        if date_to:
+            rows = rows.filter(created_at__date__lte=date_to)
+        return Response(MovementSerializer(rows[:100], many=True).data)
 
 
 class AdjustmentView(TenantAPIView):
@@ -100,16 +135,16 @@ class ProductionViewSet(
 
 class TransferViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, TenantScopedViewSet):
     serializer_class = TransferSerializer
-    queryset = StockTransfer.objects.select_related("destination_location").prefetch_related(
-        "lines__item"
-    )
+    queryset = StockTransfer.objects.select_related(
+        "destination_location", "source_location"
+    ).prefetch_related("lines__item")
     required_feature = "inventory"
     permission_rules = {
         "list": "inventory.view",
         "retrieve": "inventory.view",
         "create": "inventory.dispatch",
         "approve": "inventory.dispatch",
-        "dispatch": "inventory.dispatch",
+        "dispatch_stock": "inventory.dispatch",
         "receive": "inventory.receive",
         "close": "inventory.adjust",
     }
@@ -141,8 +176,8 @@ class TransferViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, TenantSc
         transfer = services.approve_transfer(request.tenant, self.get_object(), request=request)
         return Response(TransferSerializer(self.get_queryset().get(pk=transfer.pk)).data)
 
-    @action(detail=True, methods=["post"])
-    def dispatch(self, request, pk=None):
+    @action(detail=True, methods=["post"], url_path="dispatch")
+    def dispatch_stock(self, request, pk=None):
         transfer = services.dispatch_transfer(request.tenant, self.get_object(), request=request)
         return Response(TransferSerializer(self.get_queryset().get(pk=transfer.pk)).data)
 
