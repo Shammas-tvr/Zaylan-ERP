@@ -34,6 +34,9 @@ INSTALLED_APPS = [
     "apps.platform_admin",
     "apps.notifications",
     "apps.expenses",
+    "apps.catalog",
+    "apps.inventory",
+    "apps.sales",
 ]
 
 MIDDLEWARE = [

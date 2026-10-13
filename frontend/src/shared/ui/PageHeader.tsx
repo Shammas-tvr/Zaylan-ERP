@@ -16,6 +16,13 @@ const tones: Record<string, string> = {
   draft: 'bg-cream-deep text-ink-soft',
   pending_approval: 'bg-warning-soft text-warning',
   approved: 'bg-success-soft text-success',
+  dispatched: 'bg-warning-soft text-warning',
+  received: 'bg-success-soft text-success',
+  partially_received: 'bg-warning-soft text-warning',
+  closed: 'bg-cream-deep text-ink-soft',
+  completed: 'bg-success-soft text-success',
+  refunded: 'bg-cream-deep text-ink-soft',
+  voided: 'bg-cream-deep text-ink-soft',
   rejected: 'bg-danger-soft text-danger',
   paid: 'bg-success-soft text-success',
 }

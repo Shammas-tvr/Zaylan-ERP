@@ -1,6 +1,11 @@
 export const workspaceNav = [
   { to: '/', label: 'Overview', permission: null, end: true },
   { to: '/branches', label: 'Branches', permission: 'branches.view', end: false },
+  { to: '/products', label: 'Products', permission: 'catalog.view', end: false },
+  { to: '/production', label: 'Production', permission: 'production.manage', end: false },
+  { to: '/inventory', label: 'Inventory', permission: 'inventory.view', end: false },
+  { to: '/transfers', label: 'Transfers', permission: 'inventory.view', end: false },
+  { to: '/sales', label: 'Sales', permission: 'sales.view', end: false },
   { to: '/expenses', label: 'Expenses', permission: 'expenses.view', end: false },
   { to: '/expenses/approvals', label: 'Approvals', permission: 'expenses.approve', end: false },
   { to: '/expenses/recurring', label: 'Recurring', permission: 'expenses.configure', end: false },

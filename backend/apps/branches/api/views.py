@@ -16,7 +16,7 @@ class BranchViewSet(
     TenantScopedViewSet,
 ):
     serializer_class = BranchSerializer
-    queryset = Branch.objects.all()
+    queryset = Branch.objects.select_related("login_user")
     permission_rules = {
         "list": "branches.view",
         "retrieve": "branches.view",

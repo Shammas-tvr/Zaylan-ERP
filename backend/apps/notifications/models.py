@@ -13,6 +13,8 @@ class NotificationType(models.TextChoices):
     EXPENSE_REMINDER = "EXPENSE_REMINDER", "Expense reminder"
     EXPENSE_PAID = "EXPENSE_PAID", "Expense paid"
     INVITATION = "INVITATION", "Invitation"
+    TRANSFER_DISPATCHED = "TRANSFER_DISPATCHED", "Transfer dispatched"
+    TRANSFER_DISCREPANCY = "TRANSFER_DISCREPANCY", "Transfer discrepancy"
     GENERIC = "GENERIC", "Generic"
 
 

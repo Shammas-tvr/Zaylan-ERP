@@ -45,6 +45,7 @@ export type Branch = {
   phone: string
   email: string
   address: string
+  username?: string
 }
 
 export type BranchInput = {
@@ -54,6 +55,8 @@ export type BranchInput = {
   phone: string
   email: string
   address: string
+  login_username?: string
+  login_password?: string
 }
 
 export type PermissionGrant =

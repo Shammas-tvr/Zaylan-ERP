@@ -26,6 +26,13 @@ export const statusLabel: Record<string, string> = {
   draft: 'Draft',
   pending_approval: 'Pending approval',
   approved: 'Approved',
+  dispatched: 'Dispatched',
+  received: 'Received',
+  partially_received: 'Partially received',
+  closed: 'Closed',
+  completed: 'Completed',
+  refunded: 'Refunded',
+  voided: 'Voided',
   rejected: 'Rejected',
   paid: 'Paid',
 }

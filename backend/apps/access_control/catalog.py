@@ -70,6 +70,31 @@ TENANT_PERMISSIONS: tuple[PermissionDef, ...] = (
         "expenses",
         "Manage expense categories and recurring expense templates.",
     ),
+    PermissionDef("catalog.view", "View products and recipes", "catalog"),
+    PermissionDef("catalog.manage", "Manage products and recipes", "catalog"),
+    PermissionDef("production.manage", "Manage production", "production"),
+    PermissionDef("inventory.view", "View inventory", "inventory"),
+    PermissionDef(
+        "inventory.dispatch",
+        "Dispatch stock",
+        "inventory",
+        "Create and dispatch transfers from the central kitchen.",
+    ),
+    PermissionDef(
+        "inventory.receive",
+        "Receive stock",
+        "inventory",
+        "Confirm quantities received at a branch.",
+    ),
+    PermissionDef(
+        "inventory.adjust",
+        "Adjust inventory",
+        "inventory",
+        "Record wastage, expiry, and stock adjustments.",
+    ),
+    PermissionDef("pos.sell", "Record sales", "sales"),
+    PermissionDef("pos.refund", "Refund or void sales", "sales"),
+    PermissionDef("sales.view", "View sales", "sales"),
 )
 
 PLATFORM_PERMISSIONS: tuple[PermissionDef, ...] = (
@@ -153,6 +178,43 @@ TENANT_ROLE_TEMPLATES: tuple[RoleTemplate, ...] = (
         "Read-only access to explicitly authorized financial information.",
         frozenset({"organization.view"}),
         "TENANT",
+    ),
+    RoleTemplate(
+        "central_kitchen",
+        "Central Kitchen Manager",
+        "Produces in the central kitchen and dispatches stock to branches.",
+        frozenset(
+            {
+                "organization.view",
+                "branches.view",
+                "catalog.view",
+                "production.manage",
+                "inventory.view",
+                "inventory.dispatch",
+                "inventory.adjust",
+            }
+        ),
+        "TENANT",
+    ),
+    RoleTemplate(
+        "branch_login",
+        "Branch login",
+        "One login for a single branch. Confirms deliveries, sells, and submits expenses.",
+        frozenset(
+            {
+                "organization.view",
+                "branches.view",
+                "catalog.view",
+                "inventory.view",
+                "inventory.receive",
+                "expenses.view",
+                "expenses.submit",
+                "pos.sell",
+                "pos.refund",
+                "sales.view",
+            }
+        ),
+        "BRANCHES",
     ),
 )
 

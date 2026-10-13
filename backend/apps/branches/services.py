@@ -1,9 +1,11 @@
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.db import IntegrityError, transaction
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.audit_logs.services import record_event
 from apps.core.exceptions import ConflictError
-from apps.subscriptions.services import enforce_limit
+from apps.subscriptions.services import enforce_limit, organization_usage
 
 from .models import Branch, MembershipBranchAccess
 
@@ -43,6 +45,13 @@ def create_branch(ctx, data: dict, *, request=None) -> Branch:
         organization=ctx.organization, **{f: data[f] for f in BRANCH_FIELDS if f in data}
     )
     _save_branch(branch)
+    from apps.inventory.services import ensure_branch_location
+
+    ensure_branch_location(branch)
+    username = (data.get("login_username") or "").strip()
+    password = data.get("login_password") or ""
+    if username or password:
+        _attach_branch_login(ctx, branch, username, password)
     record_event(
         action="branches.created",
         actor=ctx.user,
@@ -65,6 +74,9 @@ def update_branch(ctx, branch: Branch, data: dict, *, request=None) -> Branch:
             setattr(branch, field, data[field])
     if changed:
         _save_branch(branch)
+        from apps.inventory.services import ensure_branch_location
+
+        ensure_branch_location(branch)
         record_event(
             action="branches.updated",
             actor=ctx.user,
@@ -74,7 +86,73 @@ def update_branch(ctx, branch: Branch, data: dict, *, request=None) -> Branch:
             metadata=changed,
             request=request,
         )
+    username = (data.get("login_username") or "").strip()
+    password = data.get("login_password") or ""
+    if branch.login_user_id and password:
+        validate_password(password, user=branch.login_user)
+        branch.login_user.set_password(password)
+        branch.login_user.save(update_fields=["password"])
+        record_event(
+            action="branches.login_reset",
+            actor=ctx.user,
+            organization=ctx.organization,
+            branch=branch,
+            target=branch,
+            metadata={"username": branch.login_user.username},
+            request=request,
+        )
+    elif username and password and branch.login_user_id is None:
+        _attach_branch_login(ctx, branch, username, password)
     return branch
+
+
+def _attach_branch_login(ctx, branch: Branch, username: str, password: str) -> None:
+    from apps.access_control.models import AssignmentScope, MembershipRoleAssignment
+    from apps.access_control.services import sync_system_roles
+    from apps.tenancy.models import MembershipStatus, OrganizationMembership
+
+    if len(username) < 3 or not username.replace("_", "").replace(".", "").isalnum():
+        raise ValidationError(
+            {"login_username": ["Use at least 3 letters, numbers, dots, or underscores."]}
+        )
+    User = get_user_model()
+    if User.objects.filter(username__iexact=username).exists():
+        raise ConflictError("This username is already taken.")
+    validate_password(password)
+    usage = organization_usage(ctx.organization)
+    enforce_limit(ctx.entitlements, "members", usage["members"] + 1)
+    roles = sync_system_roles(ctx.organization)
+    internal_email = f"{username.lower()}@{ctx.organization.slug}.branch.zaylan.local"
+    try:
+        user = User.objects.create_user(
+            email=internal_email,
+            password=password,
+            username=username,
+            full_name=branch.name[:150],
+        )
+    except IntegrityError as exc:
+        raise ConflictError("This username is already taken.") from exc
+    membership = OrganizationMembership.objects.create(
+        organization=ctx.organization,
+        user=user,
+        status=MembershipStatus.ACTIVE,
+        is_owner=False,
+    )
+    MembershipRoleAssignment.objects.create(
+        organization=ctx.organization,
+        membership=membership,
+        role=roles["branch_login"],
+        scope=AssignmentScope.BRANCHES,
+        assigned_by=ctx.user,
+    )
+    MembershipBranchAccess.objects.create(
+        organization=ctx.organization,
+        membership=membership,
+        branch=branch,
+        granted_by=ctx.user,
+    )
+    branch.login_user = user
+    branch.save(update_fields=["login_user", "updated_at"])
 
 
 def resolve_branches(ctx, branch_ids) -> list[Branch]:

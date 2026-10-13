@@ -90,7 +90,7 @@ class MyContextView(TenantAPIView):
         ctx = request.tenant
         branches = Branch.objects.filter(
             organization=ctx.organization, pk__in=ctx.accessible_branch_ids
-        ).order_by("name")
+        ).select_related("login_user").order_by("name")
         return Response(
             {
                 "organization": OrganizationSerializer(ctx.organization).data,
@@ -103,6 +103,7 @@ class MyContextView(TenantAPIView):
                         "code": branch.code,
                         "name": branch.name,
                         "status": branch.status,
+                        "username": branch.login_user.username if branch.login_user_id else "",
                         "permissions": sorted(ctx.branch_permissions[branch.pk]),
                     }
                     for branch in branches

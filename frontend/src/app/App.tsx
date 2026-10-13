@@ -7,6 +7,11 @@ import { LoginPage } from '../features/auth/LoginPage.tsx'
 import { SuperAdminLoginPage } from '../features/auth/SuperAdminLoginPage.tsx'
 import { AuditPage } from '../features/audit/AuditPage.tsx'
 import { BranchesPage } from '../features/branches/BranchesPage.tsx'
+import { InventoryPage } from '../features/inventory/InventoryPage.tsx'
+import { ProductionPage } from '../features/inventory/ProductionPage.tsx'
+import { ProductsPage } from '../features/inventory/ProductsPage.tsx'
+import { SalesPage } from '../features/inventory/SalesPage.tsx'
+import { TransfersPage } from '../features/inventory/TransfersPage.tsx'
 import { ApprovalsPage } from '../features/expenses/ApprovalsPage.tsx'
 import { ExpenseDetailPage } from '../features/expenses/ExpenseDetailPage.tsx'
 import { ExpensesPage } from '../features/expenses/ExpensesPage.tsx'
@@ -41,6 +46,11 @@ const router = createBrowserRouter([
             children: [
               { index: true, element: <OverviewPage /> },
               { path: 'branches', element: <BranchesPage /> },
+              { path: 'products', element: <ProductsPage /> },
+              { path: 'production', element: <ProductionPage /> },
+              { path: 'inventory', element: <InventoryPage /> },
+              { path: 'transfers', element: <TransfersPage /> },
+              { path: 'sales', element: <SalesPage /> },
               { path: 'expenses', element: <ExpensesPage /> },
               { path: 'expenses/approvals', element: <ApprovalsPage /> },
               { path: 'expenses/recurring', element: <RecurringPage /> },

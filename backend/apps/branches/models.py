@@ -28,6 +28,13 @@ class Branch(TimeStampedModel):
     city = models.CharField(max_length=100, blank=True)
     state = models.CharField(max_length=100, blank=True)
     postal_code = models.CharField(max_length=16, blank=True)
+    login_user = models.OneToOneField(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="branch_login",
+    )
 
     class Meta:
         ordering = ["name"]

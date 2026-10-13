@@ -4,6 +4,10 @@ from ..models import Branch
 
 
 class BranchSerializer(serializers.ModelSerializer):
+    login_username = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    login_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    username = serializers.SerializerMethodField()
+
     class Meta:
         model = Branch
         fields = (
@@ -19,12 +23,19 @@ class BranchSerializer(serializers.ModelSerializer):
             "city",
             "state",
             "postal_code",
+            "username",
+            "login_username",
+            "login_password",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = ("id", "username", "created_at", "updated_at")
         # Uniqueness is checked inside the tenant by the service layer.
         validators: list = []
+
+    def get_username(self, branch: Branch) -> str:
+        user = getattr(branch, "login_user", None)
+        return user.username if user and user.username else ""
 
 
 class BranchMemberSerializer(serializers.Serializer):

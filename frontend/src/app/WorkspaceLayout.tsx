@@ -42,6 +42,11 @@ export function WorkspaceLayout() {
     }
   }, [organizations.data, session.organizationId])
 
+  useEffect(() => {
+    const rows = workspace.data?.branches ?? []
+    if (rows.length === 1 && session.branchId !== rows[0].id) selectBranch(rows[0].id)
+  }, [workspace.data, session.branchId])
+
   const summary = organizations.data?.find((item) => item.id === session.organizationId)
   const branding = workspace.data?.branding ?? summary?.branding ?? defaultBranding
   const permissions = workspace.data?.permissions

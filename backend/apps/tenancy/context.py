@@ -25,6 +25,11 @@ NON_BRANCHABLE_PERMISSIONS = frozenset(
         "expenses.approve",
         "expenses.pay",
         "expenses.configure",
+        "catalog.view",
+        "catalog.manage",
+        "production.manage",
+        "inventory.dispatch",
+        "inventory.adjust",
     }
 )
 

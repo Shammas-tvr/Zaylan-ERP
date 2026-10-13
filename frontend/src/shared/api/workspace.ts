@@ -94,6 +94,7 @@ function mapBranch(raw: Record<string, unknown>): Branch {
     phone: String(raw.phone ?? ''),
     email: String(raw.email ?? ''),
     address: String(raw.address_line1 || raw.address || raw.city || ''),
+    username: String(raw.username ?? ''),
   }
 }
 
@@ -278,7 +279,14 @@ export async function createBranch(input: BranchInput) {
     phone: input.phone,
     email: input.email,
     address_line1: input.address,
+    login_username: input.login_username,
+    login_password: input.login_password,
   })
+  return mapBranch(data)
+}
+
+export async function updateBranchLogin(id: string, input: { login_username?: string; login_password: string }) {
+  const { data } = await client.patch<Record<string, unknown>>(`/branches/${id}/`, input)
   return mapBranch(data)
 }
 
