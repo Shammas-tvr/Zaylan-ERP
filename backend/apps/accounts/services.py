@@ -247,11 +247,17 @@ def _brand_admin_for_slug(slug: str):
 
 
 def _deliver_otp_email(*, email: str, code: str) -> None:
-    """
-    Deliver OTP using Django's mail backend.
-    Default is console (no EMAIL_HOST / SMTP env required) — code prints in the server log.
-    """
-    send_system_email(
+    """Send the OTP through SMTP. Fails the request when the mailbox is not configured or send fails."""
+    using_smtp = str(settings.EMAIL_BACKEND).endswith("smtp.EmailBackend")
+    if using_smtp and (not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD):
+        raise ValidationError(
+            {
+                "detail": [
+                    "SMTP is not configured. Set EMAIL_HOST_USER and EMAIL_HOST_PASSWORD in backend/.env, then restart the API."
+                ]
+            }
+        )
+    sent = send_system_email(
         subject="Your Zaylan password reset code",
         message=(
             f"Your password reset code is {code}.\n\n"
@@ -265,6 +271,10 @@ def _deliver_otp_email(*, email: str, code: str) -> None:
             "<p>If you did not request this, you can ignore this email.</p>"
         ),
     )
+    if not sent:
+        raise ValidationError(
+            {"detail": ["The reset code could not be emailed. Check the SMTP host, user, and app password."]}
+        )
 
 
 def request_password_reset(*, slug: str, request=None) -> None:

@@ -29,4 +29,4 @@ Reminder intervals default to 24h and 48h (configurable per brand under Settings
 
 ## Env
 
-See `backend/.env.example` for `EMAIL_*`, `DEFAULT_FROM_EMAIL`, `MEDIA_ROOT`, `EXPENSE_RECEIPT_MAX_BYTES`.
+See `backend/.env` for `EMAIL_*`, `DEFAULT_FROM_EMAIL`, `MEDIA_ROOT`, `EXPENSE_RECEIPT_MAX_BYTES`.

@@ -12,6 +12,7 @@ import { ExpenseDetailPage } from '../features/expenses/ExpenseDetailPage.tsx'
 import { ExpensesPage } from '../features/expenses/ExpensesPage.tsx'
 import { RecurringPage } from '../features/expenses/RecurringPage.tsx'
 import { ExpenseReportsPage } from '../features/expenses/ReportsPage.tsx'
+import { NotFoundPage } from '../features/errors/NotFoundPage.tsx'
 import { OverviewPage } from '../features/overview/OverviewPage.tsx'
 import { PeoplePage } from '../features/people/PeoplePage.tsx'
 import { PlansPage } from '../features/platform/PlansPage.tsx'
@@ -52,10 +53,12 @@ const router = createBrowserRouter([
               { path: 'platform/brands', element: <TenantsPage /> },
               { path: 'platform/tenants', element: <Navigate to="/platform/brands" replace /> },
               { path: 'platform/plans', element: <PlansPage /> },
+              { path: '*', element: <NotFoundPage /> },
             ],
           },
         ],
       },
+      { path: '*', element: <NotFoundPage /> },
     ],
   },
 ])

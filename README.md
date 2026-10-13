@@ -14,16 +14,11 @@ Multi-tenant ERP + POS SaaS. Phase 1 establishes identity, organizations, branch
 
 ## Environment
 
-Never commit `.env` files. Copy the examples and fill in local values.
+Never commit `.env` files. Local settings live in `backend/.env` and `frontend/.env`.
 
-```powershell
-copy backend\.env.example backend\.env
-copy frontend\.env.example frontend\.env.local
-```
+`backend/.env` must include a strong `DJANGO_SECRET_KEY`, a distinct `JWT_SIGNING_KEY`, a `DATABASE_URL` for a PostgreSQL role that can create databases (required by tests), and SMTP values for password-reset email (`EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL`).
 
-`backend/.env` must include a strong `DJANGO_SECRET_KEY`, a distinct `JWT_SIGNING_KEY`, and a `DATABASE_URL` for a PostgreSQL role that can create databases (required by tests).
-
-`frontend/.env.local` uses `VITE_API_BASE_URL=/api/v1` so the Vite dev server proxies `/api` to Django.
+`frontend/.env` leaves `VITE_API_URL` empty so the Vite dev server proxies `/api` to Django.
 
 ## Database
 

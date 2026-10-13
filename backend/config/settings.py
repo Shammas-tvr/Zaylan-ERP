@@ -94,16 +94,24 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(env("MEDIA_ROOT", default=str(BASE_DIR / "media")))
 
-EMAIL_BACKEND = env(
-    "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
-)
-EMAIL_HOST = env("EMAIL_HOST", default="")
+EMAIL_HOST = env("EMAIL_HOST", default="smtp.gmail.com")
 EMAIL_PORT = env.int("EMAIL_PORT", default=587)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="Zaylan <noreply@zaylan.local>")
+EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=20)
+# SMTP when a mailbox is configured; otherwise console so local tests still run.
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND",
+    default=(
+        "django.core.mail.backends.smtp.EmailBackend"
+        if EMAIL_HOST_USER
+        else "django.core.mail.backends.console.EmailBackend"
+    ),
+)
+# Gmail rejects a From address that is not the authenticated mailbox.
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default=EMAIL_HOST_USER or "Zaylan <noreply@zaylan.local>")
 
 # Max size for expense receipt uploads (bytes).
 EXPENSE_RECEIPT_MAX_BYTES = env.int("EXPENSE_RECEIPT_MAX_BYTES", default=5 * 1024 * 1024)

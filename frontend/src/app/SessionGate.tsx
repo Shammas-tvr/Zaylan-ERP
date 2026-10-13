@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { refreshAccess } from '../shared/api/client.ts'
 import { sessionStore } from '../shared/session.ts'
 import { Wordmark } from '../shared/ui/Wordmark.tsx'
@@ -37,6 +37,10 @@ export function SessionGate() {
 
 export function RequireSession() {
   const session = useSession()
-  if (!session.accessToken && !session.preview) return <Navigate to="/login" replace />
+  const location = useLocation()
+  if (!session.accessToken && !session.preview) {
+    const to = location.pathname.startsWith('/platform') ? '/superadmin/login' : '/login'
+    return <Navigate to={to} replace />
+  }
   return <Outlet />
 }
