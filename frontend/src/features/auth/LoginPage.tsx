@@ -1,14 +1,11 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
-import { ZAYLAN_ID } from '../preview/data.ts'
-import { resetPreview } from '../preview/store.ts'
-import { listOrganizations, login } from '../../shared/api/workspace.ts'
+import { getMe, listOrganizations, login } from '../../shared/api/workspace.ts'
 import { queryClient } from '../../shared/api/queryClient.ts'
 import { errorMessage } from '../../shared/api/errors.ts'
 import { apiBaseUrl } from '../../shared/api/client.ts'
 import { usePageTitle } from '../../shared/hooks.ts'
-import { sessionStore } from '../../shared/session.ts'
 import { Button } from '../../shared/ui/Button.tsx'
 import { TextField } from '../../shared/ui/Field.tsx'
 import { Wordmark } from '../../shared/ui/Wordmark.tsx'
@@ -23,9 +20,19 @@ export function LoginPage() {
   const mutation = useMutation({
     mutationFn: () => login(email, password),
     onSuccess: async () => {
-      const organizations = await listOrganizations()
+      const [organizations, me] = await Promise.all([listOrganizations(), getMe()])
       queryClient.setQueryData(['organizations'], organizations)
-      if (organizations[0]) selectOrganization(organizations[0].id)
+      queryClient.setQueryData(['me'], me)
+      if (organizations[0]) {
+        selectOrganization(organizations[0].id)
+        navigate('/')
+        return
+      }
+      // Platform-only accounts (Super Admin) have no brand membership yet.
+      if (me.platform_permissions?.some((code) => code.startsWith('platform.'))) {
+        navigate('/platform/brands')
+        return
+      }
       navigate('/')
     },
   })
@@ -82,19 +89,6 @@ export function LoginPage() {
           <Button type="submit" disabled={mutation.isPending}>
             {mutation.isPending ? 'Signing in…' : 'Sign in'}
           </Button>
-          {import.meta.env.DEV ? (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                resetPreview()
-                queryClient.clear()
-                sessionStore.set({ preview: true, accessToken: null, organizationId: ZAYLAN_ID, branchId: null })
-                navigate('/')
-              }}
-            >
-              Open a sample workspace
-            </Button>
-          ) : null}
           <p className="text-xs text-ink-soft">API {apiBaseUrl}</p>
         </form>
       </section>

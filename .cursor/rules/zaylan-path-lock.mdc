@@ -1,0 +1,14 @@
+---
+description: Lock Zaylan work to the Desktop project path only
+alwaysApply: true
+---
+
+# Zaylan path lock
+
+The **only** valid Zaylan project root is:
+
+`C:\Users\muham\OneDrive\Desktop\zaylan`
+
+- Do all Zaylan edits, installs, builds, and git work in this path only.
+- Ignore `Projects\zaylan`, home copies, and any other Zaylan folder.
+- If the agent is not already rooted here, call `move_agent_to_root` with this path before project work.
