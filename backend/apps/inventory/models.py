@@ -128,6 +128,8 @@ class ProductionOrder(TimeStampedModel):
     planned_quantity = models.DecimalField(max_digits=14, decimal_places=3)
     actual_quantity = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     waste_quantity = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    unit_cost = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    production_cost = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     status = models.CharField(
         max_length=16, choices=ProductionStatus.choices, default=ProductionStatus.DRAFT
     )

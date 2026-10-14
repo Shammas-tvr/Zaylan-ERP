@@ -5,10 +5,11 @@ from apps.core.models import TimeStampedModel
 
 
 class ItemKind(models.TextChoices):
-    RAW = "RAW", "Raw material"
+    RAW = "RAW", "Ingredient"
     PACKAGING = "PACKAGING", "Packaging"
-    SEMI = "SEMI", "Semi-finished"
+    SEMI = "SEMI", "Semi-finished product"
     FINISHED = "FINISHED", "Finished product"
+    RESALE = "RESALE", "Purchased resale item"
 
 
 class BaseUnit(models.TextChoices):
@@ -34,6 +35,9 @@ class StockUnit(models.TextChoices):
     L = "L", "Litre"
     EACH = "EACH", "Piece"
     BOX = "BOX", "Box"
+    PACKET = "PACKET", "Packet"
+    BOTTLE = "BOTTLE", "Bottle"
+    TRAY = "TRAY", "Tray"
 
 
 class Item(TimeStampedModel):
@@ -49,6 +53,14 @@ class Item(TimeStampedModel):
     purchase_unit = models.CharField(max_length=8, choices=StockUnit.choices, blank=True)
     purchase_factor = models.DecimalField(max_digits=14, decimal_places=3, default=1)
     supplier_name = models.CharField(max_length=150, blank=True)
+    default_supplier = models.ForeignKey(
+        "Supplier",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="default_for_items",
+    )
+    suppliers = models.ManyToManyField("Supplier", blank=True, related_name="items")
     costing_method = models.CharField(
         max_length=24, choices=CostingMethod.choices, default=CostingMethod.MOVING_AVERAGE
     )
@@ -65,6 +77,7 @@ class Item(TimeStampedModel):
     tracks_expiry = models.BooleanField(default=False)
     expiry_date = models.DateField(null=True, blank=True)
     tracks_stock = models.BooleanField(default=True)
+    image_key = models.CharField(max_length=300, blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -78,6 +91,52 @@ class Item(TimeStampedModel):
 
     def __str__(self) -> str:
         return self.name
+
+
+class Supplier(TimeStampedModel):
+    """A brand's supplier. Items point here instead of copying contact details."""
+
+    organization = models.ForeignKey(
+        "tenancy.Organization", on_delete=models.PROTECT, related_name="suppliers"
+    )
+    name = models.CharField(max_length=150)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                "organization", Upper("name"), name="catalog_supplier_org_name_unique"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ItemLocationPolicy(TimeStampedModel):
+    """Where an item may be stocked, and the low-stock threshold in the item's stock unit."""
+
+    item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name="location_policies")
+    location = models.ForeignKey(
+        "inventory.InventoryLocation", on_delete=models.CASCADE, related_name="item_policies"
+    )
+    minimum_quantity = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "location"], name="catalog_item_location_policy_unique"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.item} @ {self.location}"
+
+
+class RecipeStatus(models.TextChoices):
+    DRAFT = "DRAFT", "Draft"
+    CONFIRMED = "CONFIRMED", "Confirmed"
 
 
 class Recipe(TimeStampedModel):
@@ -95,6 +154,9 @@ class Recipe(TimeStampedModel):
         null=True,
         blank=True,
         related_name="recipes",
+    )
+    status = models.CharField(
+        max_length=16, choices=RecipeStatus.choices, default=RecipeStatus.CONFIRMED
     )
     is_active = models.BooleanField(default=True)
 
@@ -120,6 +182,11 @@ class RecipeLine(TimeStampedModel):
 
     class Meta:
         ordering = ["consume_at", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["recipe", "ingredient"], name="catalog_recipe_line_ingredient_unique"
+            ),
+        ]
 
 
 class Product(TimeStampedModel):
@@ -131,7 +198,11 @@ class Product(TimeStampedModel):
     sku = models.CharField(max_length=32)
     name = models.CharField(max_length=150)
     category = models.CharField(max_length=80, blank=True)
+    description = models.TextField(blank=True)
+    image_key = models.CharField(max_length=300, blank=True)
     selling_price = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    labour_cost = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    overhead_cost = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     sale_unit = models.CharField(max_length=8, choices=StockUnit.choices, default=StockUnit.EACH)
     kind = models.CharField(max_length=16, choices=ItemKind.choices, default=ItemKind.FINISHED)
     inventory_item = models.ForeignKey(

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from ..models import (
@@ -22,7 +24,7 @@ class BalanceSerializer(serializers.ModelSerializer):
     category = serializers.CharField(source="item.category")
     base_unit = serializers.CharField(source="item.base_unit")
     stock_unit = serializers.CharField(source="item.stock_unit")
-    minimum_stock = serializers.DecimalField(source="item.minimum_stock", max_digits=14, decimal_places=3)
+    minimum_stock = serializers.SerializerMethodField()
     expiry_date = serializers.DateField(source="item.expiry_date", allow_null=True)
     location_name = serializers.CharField(source="location.name")
     location_kind = serializers.CharField(source="location.kind")
@@ -46,6 +48,13 @@ class BalanceSerializer(serializers.ModelSerializer):
             "quantity",
         )
 
+    def get_minimum_stock(self, balance) -> Decimal:
+        policies = list(balance.item.location_policies.all())
+        if not policies:
+            return balance.item.minimum_stock
+        match = next((row for row in policies if row.location_id == balance.location_id), None)
+        return match.minimum_quantity if match else Decimal("0")
+
 
 class ProductionSerializer(serializers.ModelSerializer):
     recipe_name = serializers.CharField(source="recipe.output_item.name", read_only=True)
@@ -59,6 +68,8 @@ class ProductionSerializer(serializers.ModelSerializer):
             "planned_quantity",
             "actual_quantity",
             "waste_quantity",
+            "unit_cost",
+            "production_cost",
             "status",
             "completed_at",
             "created_at",

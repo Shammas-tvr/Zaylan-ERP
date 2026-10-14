@@ -1,3 +1,4 @@
+import re
 from datetime import date
 
 from django.db import IntegrityError, transaction
@@ -8,8 +9,10 @@ from rest_framework.exceptions import ValidationError
 from apps.audit_logs.services import record_event
 from apps.core.exceptions import BusinessRuleViolation, ConflictError
 
-from .models import Item, Product, Recipe, RecipeLine, StockUnit
-from .units import quantity_in_base
+from apps.core.storage import owned_image_key
+
+from .models import Item, ItemLocationPolicy, Product, Recipe, RecipeLine, RecipeStatus, StockUnit, Supplier
+from .units import quantity_in_base, stock_factor
 
 BASE_FOR_STOCK = {
     "G": "G",
@@ -18,7 +21,61 @@ BASE_FOR_STOCK = {
     "L": "ML",
     "EACH": "EACH",
     "BOX": "EACH",
+    "PACKET": "EACH",
+    "BOTTLE": "EACH",
+    "TRAY": "EACH",
 }
+
+
+def line_cost(line) -> "Decimal":
+    from decimal import Decimal
+
+    base = quantity_in_base(line.quantity, line.unit, line.ingredient)
+    factor = stock_factor(line.ingredient.stock_unit or line.ingredient.base_unit)
+    per_base = Decimal(line.ingredient.standard_cost) / factor
+    return base * per_base
+
+
+def ingredient_cost_per_unit(recipe: Recipe):
+    from decimal import Decimal
+
+    total = sum((line_cost(line) for line in recipe.lines.all()), Decimal("0"))
+    yield_quantity = Decimal(recipe.yield_quantity or 1)
+    if yield_quantity <= 0:
+        yield_quantity = Decimal("1")
+    return (total / yield_quantity).quantize(Decimal("0.01"))
+
+
+def product_estimate(product: Product) -> dict:
+    from decimal import Decimal
+
+    active = [row for row in product.recipes.all() if row.is_active]
+    active.sort(key=lambda row: (row.effective_from, row.version), reverse=True)
+    latest = active[0] if active else None
+    confirmed = [row for row in active if row.status == RecipeStatus.CONFIRMED]
+    recipe = confirmed[0] if confirmed else None
+    ingredient = ingredient_cost_per_unit(recipe) if recipe is not None else Decimal("0.00")
+    labour = Decimal(product.labour_cost or 0)
+    overhead = Decimal(product.overhead_cost or 0)
+    total = (ingredient + labour + overhead).quantize(Decimal("0.01"))
+    price = Decimal(product.selling_price or 0)
+    if price > 0:
+        profit = (price - total).quantize(Decimal("0.01"))
+        margin = (profit / price * Decimal("100")).quantize(Decimal("0.01"))
+    else:
+        profit = None
+        margin = None
+    return {
+        "recipe_id": str(recipe.pk) if recipe else None,
+        "recipe_status": latest.status if latest else "none",
+        "recipe_version": latest.version if latest else None,
+        "ingredient_cost": str(ingredient),
+        "labour_cost": str(labour.quantize(Decimal("0.01"))),
+        "overhead_cost": str(overhead.quantize(Decimal("0.01"))),
+        "estimated_cost": str(total),
+        "gross_profit": None if profit is None else str(profit),
+        "gross_margin": None if margin is None else str(margin),
+    }
 
 
 def _decimal(value, default="0"):
@@ -45,22 +102,30 @@ def _apply_item_units(item: Item, data: dict) -> None:
     item.purchase_factor = factor
 
 
-def _next_code(organization, model, prefix: str) -> str:
+def _clean_code(value: str) -> str:
+    return re.sub(r"[^A-Z0-9-]", "", (value or "").strip().upper())
+
+
+def _name_code(organization, model, name: str, fallback: str) -> str:
     from apps.tenancy.models import Organization
 
     Organization.objects.select_for_update().get(pk=organization.pk)
+    letters = re.sub(r"[^A-Z0-9]", "", (name or "").upper())
+    base = letters[:4] or fallback.upper()
+    prefix = f"{base}-"
     numbers = []
     skus = (
         model.objects.filter(organization=organization)
         .annotate(sku_upper=Upper("sku"))
-        .filter(sku_upper__startswith=prefix)
+        .filter(sku_upper__startswith=prefix.upper())
         .values_list("sku_upper", flat=True)
     )
     for sku in skus:
         tail = sku[len(prefix) :]
         if tail.isdigit():
             numbers.append(int(tail))
-    return f"{prefix}{(max(numbers) if numbers else 0) + 1:04d}"
+    # Next number for this prefix, not a count of all items. Width grows past 99 (PIST-100).
+    return f"{prefix}{(max(numbers) if numbers else 0) + 1:02d}"
 
 
 def _item(ctx, item_id) -> Item:
@@ -72,29 +137,45 @@ def _item(ctx, item_id) -> Item:
 
 @transaction.atomic
 def create_item(ctx, data: dict, *, request=None) -> Item:
-    sku = (data.get("sku") or "").strip().upper() or _next_code(ctx.organization, Item, "ITM-")
+    provided = _clean_code(data.get("sku") or "")
+    name = data["name"].strip()
     item = Item(
         organization=ctx.organization,
-        sku=sku,
-        name=data["name"].strip(),
+        sku=provided or "PENDING",
+        name=name,
         kind=data["kind"],
         category=(data.get("category") or "").strip(),
         supplier_name=(data.get("supplier_name") or "").strip(),
         costing_method=data.get("costing_method") or "MOVING_AVERAGE",
         standard_cost=_decimal(data.get("standard_cost")),
-        minimum_stock=_decimal(data.get("minimum_stock")),
+        minimum_stock=_decimal(data.get("minimum_stock")) if "minimum_stock" in data else 0,
         tracks_batch=bool(data.get("tracks_batch")),
         tracks_expiry=bool(data.get("tracks_expiry")),
         expiry_date=data.get("expiry_date") if data.get("tracks_expiry") else None,
         tracks_stock=data.get("tracks_stock", True),
         is_active=data.get("is_active", True),
     )
+    if "image_key" in data:
+        item.image_key = owned_image_key(ctx.organization.pk, data.get("image_key") or "")
     _apply_item_units(item, data)
     _assign_storage(ctx, item, data)
-    try:
-        item.save()
-    except IntegrityError as exc:
-        raise ConflictError("An item with this SKU already exists.") from exc
+    _assign_suppliers(ctx, item, data, save=False)
+    saved = False
+    for _attempt in range(5):
+        item.sku = provided or _name_code(ctx.organization, Item, name, "ITEM")
+        try:
+            with transaction.atomic():
+                item.save()
+            saved = True
+            break
+        except IntegrityError as exc:
+            item.pk = None
+            if provided:
+                raise ConflictError("An item with this code already exists.") from exc
+    if not saved:
+        raise ConflictError("An item with this code already exists.")
+    _assign_suppliers(ctx, item, data, save=True)
+    _assign_policies(ctx, item, data)
     record_event(
         action="catalog.item_created",
         actor=ctx.user,
@@ -120,9 +201,12 @@ def update_item(ctx, item: Item, data: dict, *, request=None) -> Item:
         "tracks_batch",
         "tracks_expiry",
         "tracks_stock",
+        "image_key",
     ):
         if field in data and getattr(item, field) != data[field]:
             value = data[field].strip() if isinstance(data[field], str) else data[field]
+            if field == "image_key":
+                value = owned_image_key(ctx.organization.pk, value)
             changed[field] = [getattr(item, field), value]
             setattr(item, field, value)
     for field in ("standard_cost", "minimum_stock"):
@@ -146,17 +230,18 @@ def update_item(ctx, item: Item, data: dict, *, request=None) -> Item:
         _apply_item_units(item, {**data, "stock_unit": data.get("stock_unit") or item.stock_unit})
     if "storage_location_id" in data:
         _assign_storage(ctx, item, data)
-    if "sku" in data:
-        sku = data["sku"].strip().upper()
-        if sku != item.sku:
-            changed["sku"] = [item.sku, sku]
-            item.sku = sku
+    # An existing code stays put when the name changes. Codes are not rewritten on edit.
+    supplier_fields = {"supplier_ids", "default_supplier_id"}
+    if supplier_fields.intersection(data):
+        _assign_suppliers(ctx, item, data, save=False)
+    if "stock_policies" in data:
+        _assign_policies(ctx, item, data)
     unit_fields = {"stock_unit", "purchase_unit", "purchase_factor", "base_unit", "storage_location_id"}
-    if changed or unit_fields.intersection(data):
+    if changed or unit_fields.intersection(data) or supplier_fields.intersection(data) or "stock_policies" in data:
         try:
             item.save()
         except IntegrityError as exc:
-            raise ConflictError("An item with this SKU already exists.") from exc
+            raise ConflictError("An item with this code already exists.") from exc
         record_event(
             action="catalog.item_updated",
             actor=ctx.user,
@@ -166,6 +251,87 @@ def update_item(ctx, item: Item, data: dict, *, request=None) -> Item:
             request=request,
         )
     return item
+
+
+def _suppliers_for(ctx, ids) -> list[Supplier]:
+    wanted = list(dict.fromkeys(ids or []))
+    rows = list(Supplier.objects.filter(organization=ctx.organization, pk__in=wanted, is_active=True))
+    if len(rows) != len(wanted):
+        raise ValidationError({"supplier_ids": ["Choose suppliers for this brand."]})
+    return rows
+
+
+def _assign_suppliers(ctx, item: Item, data: dict, *, save: bool) -> None:
+    if "supplier_ids" not in data and "default_supplier_id" not in data:
+        return
+    ids = [str(value) for value in (data.get("supplier_ids") or [])]
+    default_id = data.get("default_supplier_id")
+    if default_id:
+        default_key = str(default_id)
+        if default_key not in ids:
+            ids.append(default_key)
+    else:
+        default_key = ""
+    rows = _suppliers_for(ctx, ids)
+    by_id = {str(row.pk): row for row in rows}
+    if item.pk:
+        item.suppliers.set(rows)
+    item.default_supplier = by_id.get(default_key) if default_key else None
+    if item.default_supplier_id and not item.supplier_name:
+        item.supplier_name = item.default_supplier.name
+    if save and item.pk:
+        item.save(update_fields=["default_supplier", "supplier_name", "updated_at"])
+
+
+def _visible_locations(ctx):
+    from apps.inventory.models import InventoryLocation
+    from apps.inventory.services import visible_locations
+
+    if ctx.has_permission("catalog.manage") or ctx.has_permission("inventory.view"):
+        return InventoryLocation.objects.filter(organization=ctx.organization)
+    return visible_locations(ctx)
+
+
+def _assign_policies(ctx, item: Item, data: dict) -> None:
+    if "stock_policies" not in data or not item.pk:
+        return
+    from apps.inventory.models import LocationKind
+
+    allowed = {location.pk: location for location in _visible_locations(ctx)}
+    submitted = []
+    for row in data.get("stock_policies") or []:
+        location = allowed.get(row["location_id"])
+        if location is None or location.kind == LocationKind.IN_TRANSIT:
+            raise ValidationError({"stock_policies": ["Choose a branch or storage location you can use."]})
+        minimum = _decimal(row.get("minimum_quantity"))
+        if minimum < 0:
+            raise ValidationError({"stock_policies": ["Minimum stock cannot be negative."]})
+        submitted.append((location, minimum))
+    visible_ids = list(allowed)
+    ItemLocationPolicy.objects.filter(item=item, location_id__in=visible_ids).delete()
+    ItemLocationPolicy.objects.bulk_create(
+        [
+            ItemLocationPolicy(item=item, location=location, minimum_quantity=minimum)
+            for location, minimum in submitted
+        ]
+    )
+
+
+def create_supplier(ctx, name: str) -> Supplier:
+    cleaned = (name or "").strip()
+    if not cleaned:
+        raise ValidationError({"name": ["Enter a supplier name."]})
+    existing = (
+        Supplier.objects.annotate(name_upper=Upper("name"))
+        .filter(organization=ctx.organization, name_upper=cleaned.upper())
+        .first()
+    )
+    if existing:
+        return existing
+    try:
+        return Supplier.objects.create(organization=ctx.organization, name=cleaned)
+    except IntegrityError as exc:
+        raise ConflictError("A supplier with this name already exists.") from exc
 
 
 def _assign_storage(ctx, item: Item, data: dict) -> None:
@@ -184,6 +350,21 @@ def _assign_storage(ctx, item: Item, data: dict) -> None:
     item.storage_location = location
 
 
+def _finished_item(ctx, product: Product) -> Item:
+    """A stock item for the finished product. Creating it does not add quantity."""
+    kind = product.kind if product.kind in {"SEMI", "FINISHED", "RESALE"} else "FINISHED"
+    return create_item(
+        ctx,
+        {
+            "name": product.name,
+            "kind": kind,
+            "stock_unit": product.sale_unit or "EACH",
+            "category": product.category,
+            "standard_cost": "0",
+        },
+    )
+
+
 def _branches(ctx, ids):
     from apps.branches.models import Branch
 
@@ -198,16 +379,22 @@ def _branches(ctx, ids):
 def create_product(ctx, data: dict, *, request=None) -> Product:
     product = Product(
         organization=ctx.organization,
-        sku=(data.get("sku") or "").strip().upper() or _next_code(ctx.organization, Product, "PRD-"),
+        sku=_clean_code(data.get("sku") or "") or _name_code(ctx.organization, Product, data["name"], "prod"),
         name=data["name"].strip(),
         category=(data.get("category") or "").strip(),
+        description=(data.get("description") or "").strip(),
+        image_key=owned_image_key(ctx.organization.pk, data.get("image_key") or ""),
         selling_price=_decimal(data.get("selling_price")),
+        labour_cost=_decimal(data.get("labour_cost")),
+        overhead_cost=_decimal(data.get("overhead_cost")),
         sale_unit=(data.get("sale_unit") or StockUnit.EACH).upper(),
         kind=data.get("kind") or "FINISHED",
         is_active=data.get("is_active", True),
     )
     if data.get("inventory_item_id"):
         product.inventory_item = _item(ctx, data["inventory_item_id"])
+    else:
+        product.inventory_item = _finished_item(ctx, product)
     try:
         product.save()
     except IntegrityError as exc:
@@ -232,8 +419,16 @@ def update_product(ctx, product: Product, data: dict, *, request=None) -> Produc
         product.name = data["name"].strip()
     if "category" in data:
         product.category = data["category"].strip()
+    if "description" in data:
+        product.description = data["description"].strip()
+    if "image_key" in data:
+        product.image_key = owned_image_key(ctx.organization.pk, data.get("image_key") or "")
     if "selling_price" in data:
         product.selling_price = _decimal(data["selling_price"])
+    if "labour_cost" in data:
+        product.labour_cost = _decimal(data["labour_cost"])
+    if "overhead_cost" in data:
+        product.overhead_cost = _decimal(data["overhead_cost"])
     if "sale_unit" in data:
         product.sale_unit = data["sale_unit"].upper()
     if "kind" in data:
@@ -266,6 +461,7 @@ def effective_recipe(organization, item: Item, on: date | None = None) -> Recipe
             organization=organization,
             output_item=item,
             is_active=True,
+            status=RecipeStatus.CONFIRMED,
             effective_from__lte=on,
         )
         .order_by("-effective_from", "-version")
@@ -284,9 +480,8 @@ def create_recipe(ctx, data: dict, *, request=None) -> Recipe:
         if product is None:
             raise ValidationError({"product_id": ["Unknown product."]})
         if product.inventory_item_id is None:
-            raise ValidationError(
-                {"product_id": ["Link this product to an inventory item before adding a recipe."]}
-            )
+            product.inventory_item = _finished_item(ctx, product)
+            product.save(update_fields=["inventory_item", "updated_at"])
         output = product.inventory_item
     else:
         output = _item(ctx, data["output_item_id"])
@@ -298,6 +493,9 @@ def create_recipe(ctx, data: dict, *, request=None) -> Recipe:
     lines = data["lines"]
     if not lines:
         raise ValidationError({"lines": ["A recipe needs at least one ingredient."]})
+    ingredient_ids = [str(line["ingredient_id"]) for line in lines]
+    if len(ingredient_ids) != len(set(ingredient_ids)):
+        raise ValidationError({"lines": ["Each ingredient can appear only once."]})
     version = (
         Recipe.objects.filter(organization=ctx.organization, output_item=output).count() + 1
     )
@@ -309,12 +507,13 @@ def create_recipe(ctx, data: dict, *, request=None) -> Recipe:
         yield_quantity=data["yield_quantity"],
         expected_waste_percent=waste,
         product=product,
+        status=data.get("status") or RecipeStatus.CONFIRMED,
     )
     created = []
     for line in lines:
         ingredient = _item(ctx, line["ingredient_id"])
-        if ingredient.pk == output.pk and line["consume_at"] == "PRODUCTION":
-            raise ValidationError({"lines": ["A production line cannot consume its own output."]})
+        if ingredient.pk == output.pk:
+            raise ValidationError({"lines": ["A product cannot be an ingredient in its own recipe."]})
         quantity_in_base(line["quantity"], line["unit"], ingredient)
         created.append(
             RecipeLine(

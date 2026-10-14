@@ -97,6 +97,14 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = Path(env("MEDIA_ROOT", default=str(BASE_DIR / "media")))
 
+# Cloudflare R2 (S3-compatible). Secrets stay on the server; the browser receives a presigned URL.
+R2_ACCESS_KEY_ID = env("R2_ACCESS_KEY_ID", default="")
+R2_SECRET_ACCESS_KEY = env("R2_SECRET_ACCESS_KEY", default="")
+R2_BUCKET = env("R2_BUCKET", default="")
+R2_ENDPOINT = env("R2_ENDPOINT", default="")
+R2_PUBLIC_BASE_URL = env("R2_PUBLIC_BASE_URL", default="")
+R2_IMAGE_MAX_BYTES = env.int("R2_IMAGE_MAX_BYTES", default=5_000_000)
+
 EMAIL_HOST = env("EMAIL_HOST", default="smtp.gmail.com")
 EMAIL_PORT = env.int("EMAIL_PORT", default=587)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")

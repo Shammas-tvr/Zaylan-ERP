@@ -6,15 +6,24 @@ from rest_framework.exceptions import ValidationError
 
 MASS = frozenset({"G", "KG"})
 VOLUME = frozenset({"ML", "L"})
-COUNT = frozenset({"EACH"})
+COUNT = frozenset({"EACH", "PACKET", "BOTTLE", "TRAY"})
 FACTORS = {
     "G": Decimal("1"),
     "KG": Decimal("1000"),
     "ML": Decimal("1"),
     "L": Decimal("1000"),
     "EACH": Decimal("1"),
+    "PACKET": Decimal("1"),
+    "BOTTLE": Decimal("1"),
+    "TRAY": Decimal("1"),
 }
 QUANTUM = Decimal("0.001")
+
+
+def from_base(quantity, item) -> Decimal:
+    """Convert a ledger quantity into the item's stock unit."""
+    factor = stock_factor(item.stock_unit or item.base_unit)
+    return (Decimal(quantity) / factor).quantize(QUANTUM, rounding=ROUND_HALF_UP)
 
 
 def stock_factor(stock_unit: str) -> Decimal:

@@ -9,7 +9,6 @@ import { AuditPage } from '../features/audit/AuditPage.tsx'
 import { BranchesPage } from '../features/branches/BranchesPage.tsx'
 import { InventoryTabs } from '../features/inventory/InventoryTabs.tsx'
 import { InventoryPage } from '../features/inventory/InventoryPage.tsx'
-import { RecipesPage } from '../features/inventory/RecipesPage.tsx'
 import { StockPage } from '../features/inventory/StockPage.tsx'
 import { ProductionPage } from '../features/inventory/ProductionPage.tsx'
 import { ProductsPage } from '../features/inventory/ProductsPage.tsx'
@@ -54,7 +53,7 @@ const router = createBrowserRouter([
                 element: <InventoryTabs />,
                 children: [
                   { index: true, element: <InventoryPage /> },
-                  { path: 'recipes', element: <RecipesPage /> },
+                  { path: 'recipes', element: <Navigate to="/products" replace /> },
                   { path: 'production', element: <ProductionPage /> },
                   { path: 'transfers', element: <TransfersPage /> },
                   { path: 'stock', element: <StockPage /> },

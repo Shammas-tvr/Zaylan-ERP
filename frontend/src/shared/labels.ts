@@ -35,6 +35,10 @@ export const statusLabel: Record<string, string> = {
   voided: 'Voided',
   rejected: 'Rejected',
   paid: 'Paid',
+  normal: 'Normal',
+  low: 'Low stock',
+  out: 'Out of stock',
+  unstocked: 'Not stocked',
 }
 
 export const featureLabel: Record<string, string> = {

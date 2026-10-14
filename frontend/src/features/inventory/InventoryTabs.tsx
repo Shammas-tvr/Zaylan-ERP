@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Box, BookOpen, Factory, Truck, Warehouse } from 'lucide-react'
+import { Box, Factory, Truck, Warehouse } from 'lucide-react'
 import { usePageTitle } from '../../shared/hooks.ts'
 import { can } from '../../shared/permissions.ts'
 import { NoAccess } from '../../shared/ui/Feedback.tsx'
@@ -7,7 +7,6 @@ import { useWorkspace } from '../workspace/queries.ts'
 
 const tabs = [
   { to: '/inventory', label: 'Items', icon: Box, permission: 'inventory.view', end: true },
-  { to: '/inventory/recipes', label: 'Recipes', icon: BookOpen, permission: 'catalog.view', end: false },
   { to: '/inventory/production', label: 'Production', icon: Factory, permission: 'production.manage', end: false },
   { to: '/inventory/transfers', label: 'Transfers', icon: Truck, permission: 'inventory.view', end: false },
   { to: '/inventory/stock', label: 'Stock', icon: Warehouse, permission: 'inventory.view', end: false },

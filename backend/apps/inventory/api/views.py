@@ -47,6 +47,7 @@ class BalanceView(TenantAPIView):
                 organization=request.tenant.organization, location__in=locations
             )
             .select_related("item", "location")
+            .prefetch_related("item__location_policies")
             .order_by("location__name", "item__name")
         )
         return Response(BalanceSerializer(rows, many=True).data)

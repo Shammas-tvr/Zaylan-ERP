@@ -169,6 +169,8 @@ def create_production(ctx, data: dict, *, request=None) -> ProductionOrder:
     kitchen, _ = ensure_brand_locations(ctx.organization)
     from apps.catalog.models import Recipe
 
+    from apps.catalog.models import RecipeStatus
+
     recipe = (
         Recipe.objects.filter(organization=ctx.organization, pk=data["recipe_id"], is_active=True)
         .select_related("output_item")
@@ -176,6 +178,8 @@ def create_production(ctx, data: dict, *, request=None) -> ProductionOrder:
     )
     if recipe is None:
         raise ValidationError({"recipe_id": ["Unknown recipe."]})
+    if recipe.status != RecipeStatus.CONFIRMED:
+        raise ValidationError({"recipe_id": ["Confirm the recipe before producing it."]})
     order = ProductionOrder.objects.create(
         organization=ctx.organization,
         location=kitchen,
@@ -197,7 +201,9 @@ def create_production(ctx, data: dict, *, request=None) -> ProductionOrder:
 def complete_production(ctx, order: ProductionOrder, data: dict, *, request=None) -> ProductionOrder:
     if not ctx.has_permission("production.manage"):
         raise PermissionDenied()
-    order = ProductionOrder.objects.select_for_update().select_related("recipe__output_item", "location").get(
+    order = ProductionOrder.objects.select_for_update().select_related(
+        "recipe__output_item", "location"
+    ).get(
         pk=order.pk, organization=ctx.organization
     )
     if order.status != ProductionStatus.DRAFT:
@@ -241,8 +247,17 @@ def complete_production(ctx, order: ProductionOrder, data: dict, *, request=None
                 reference_id=order.pk,
                 idempotency_key=f"production:{order.pk}:waste",
             )
+    from apps.catalog.services import ingredient_cost_per_unit
+
+    per_unit = ingredient_cost_per_unit(recipe)
+    extra = Decimal("0")
+    if recipe.product_id and recipe.product is not None:
+        extra = Decimal(recipe.product.labour_cost or 0) + Decimal(recipe.product.overhead_cost or 0)
+    unit_cost = (per_unit + extra).quantize(Decimal("0.0001"))
     order.actual_quantity = actual
     order.waste_quantity = waste
+    order.unit_cost = unit_cost
+    order.production_cost = (unit_cost * actual).quantize(Decimal("0.01"))
     order.status = ProductionStatus.COMPLETED
     order.completed_at = timezone.now()
     order.save()
@@ -251,7 +266,12 @@ def complete_production(ctx, order: ProductionOrder, data: dict, *, request=None
         actor=ctx.user,
         organization=ctx.organization,
         target=order,
-        metadata={"actual": str(actual), "waste": str(waste)},
+        metadata={
+            "actual": str(actual),
+            "waste": str(waste),
+            "recipe_version": recipe.version,
+            "unit_cost": str(order.unit_cost),
+        },
         request=request,
     )
     return order

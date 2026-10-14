@@ -1,133 +1,249 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createItem, listItems, listLocations, updateItem, type ItemInput, type StockItem } from '../../shared/api/stock.ts'
+import {
+  createItem,
+  createSupplier,
+  listItemsAt,
+  listLocations,
+  listSuppliers,
+  updateItem,
+  type ItemInput,
+  type StockItem,
+} from '../../shared/api/stock.ts'
 import { errorMessage } from '../../shared/api/errors.ts'
 import { can } from '../../shared/permissions.ts'
 import { Button } from '../../shared/ui/Button.tsx'
 import { DataTable } from '../../shared/ui/DataTable.tsx'
 import { SelectField, TextField } from '../../shared/ui/Field.tsx'
 import { ErrorState } from '../../shared/ui/Feedback.tsx'
-import { Modal } from '../../shared/ui/Modal.tsx'
-import { Panel } from '../../shared/ui/PageHeader.tsx'
-import { useWorkspace } from '../workspace/queries.ts'
-import { costingMethods, defaultPurchaseFactor, expiryLabel, kindLabel, stockUnits, unitLabel } from './catalogLabels.ts'
+import { PageHeader, Panel, StatusBadge } from '../../shared/ui/PageHeader.tsx'
+import { useSession, useWorkspace } from '../workspace/queries.ts'
+import { costingMethods, itemKinds, kindLabel, previewCode, stockStatuses, stockUnits, unitLabel } from './catalogLabels.ts'
+import { ImageField } from './ImageField.tsx'
 import { Pager, usePagedRows } from './listTools.tsx'
 
-const emptyItem = {
+type PolicyForm = { location_id: string; minimum_quantity: string }
+
+type ItemForm = {
+  name: string
+  kind: string
+  stock_unit: string
+  standard_cost: string
+  costing_method: string
+  image_key: string
+  default_supplier_id: string
+  supplier_ids: string[]
+  policies: PolicyForm[]
+  is_active: boolean
+}
+
+function formFromItem(item: StockItem): ItemForm {
+  return {
+    name: item.name,
+    kind: item.kind,
+    stock_unit: item.stock_unit || item.base_unit,
+    standard_cost: item.standard_cost,
+    costing_method: item.costing_method || 'MOVING_AVERAGE',
+    image_key: item.image_key ?? '',
+    default_supplier_id: item.default_supplier ?? '',
+    supplier_ids: item.supplier_ids ?? [],
+    policies: (item.stock_policies ?? []).map((row) => ({
+      location_id: row.location,
+      minimum_quantity: row.minimum_quantity,
+    })),
+    is_active: item.is_active,
+  }
+}
+
+const emptyItem: ItemForm = {
   name: '',
-  sku: '',
-  category: 'Raw Materials',
   kind: 'RAW',
   stock_unit: 'KG',
-  purchase_unit: 'KG',
-  purchase_factor: '1',
-  supplier_name: '',
-  costing_method: 'MOVING_AVERAGE',
   standard_cost: '0',
-  minimum_stock: '0',
-  storage_location_id: '',
-  tracks_batch: false,
-  tracks_expiry: false,
-  expiry_date: '',
-  tracks_stock: true,
+  costing_method: 'MOVING_AVERAGE',
+  image_key: '',
+  default_supplier_id: '',
+  supplier_ids: [],
+  policies: [],
   is_active: true,
 }
 
-const kindChoices = [
-  ['RAW', 'Ingredient (sugar, flour, nuts…)'],
-  ['PACKAGING', 'Packaging (boxes, bags, cups…)'],
-  ['SEMI', 'Half-made (used to make other items)'],
-  ['FINISHED', 'Ready to sell'],
-] as const
+function payload(form: ItemForm): ItemInput {
+  return {
+    name: form.name.trim(),
+    kind: form.kind,
+    stock_unit: form.stock_unit,
+    standard_cost: form.standard_cost || '0',
+    costing_method: form.costing_method,
+    image_key: form.image_key,
+    default_supplier_id: form.default_supplier_id || null,
+    supplier_ids: form.supplier_ids,
+    stock_policies: form.policies,
+    tracks_stock: true,
+    is_active: form.is_active,
+  }
+}
 
 export function InventoryPage() {
   const workspace = useWorkspace()
+  const session = useSession()
   const context = workspace.data
-  const items = useQuery({
-    queryKey: ['items'],
-    queryFn: listItems,
-    enabled: Boolean(context && can(context.permissions, 'catalog.view')),
-  })
+  const queryClient = useQueryClient()
+  const locations = useQuery({ queryKey: ['locations'], queryFn: listLocations, enabled: Boolean(context) })
+  const places = (locations.data ?? []).filter((location) => location.kind !== 'IN_TRANSIT')
+  const [locationId, setLocationId] = useState('')
   const [editor, setEditor] = useState<StockItem | 'new' | null>(null)
   const [editing, setEditing] = useState(false)
   const [query, setQuery] = useState('')
-  const filtered = (items.data ?? []).filter((item) => {
-    const haystack = `${item.name} ${item.sku} ${item.category} ${kindLabel(item.kind)}`.toLowerCase()
-    return haystack.includes(query.trim().toLowerCase())
+  const [kind, setKind] = useState('')
+  const [status, setStatus] = useState('')
+  const [notice, setNotice] = useState('')
+  const items = useQuery({
+    queryKey: ['items', locationId],
+    queryFn: () => listItemsAt(locationId),
+    enabled: Boolean(context && locationId && can(context.permissions, 'catalog.view')),
   })
-  const paged = usePagedRows(filtered, query)
+  const deactivate = useMutation({
+    mutationFn: (id: string) => updateItem(id, { is_active: false }),
+    onSuccess: async () => {
+      setNotice('Item deactivated. Past stock movements are unchanged.')
+      await queryClient.invalidateQueries({ queryKey: ['items'] })
+    },
+  })
+
+  useEffect(() => {
+    if (locationId || places.length === 0) return
+    const match = places.find((location) => location.branch && location.branch === session.branchId)
+    setLocationId((match ?? places[0]).id)
+  }, [places, locationId, session.branchId])
+
   if (!context) return null
   const canManage = can(context.permissions, 'catalog.manage')
+  const currency = context.organization.currency || ''
+  const filtered = (items.data ?? []).filter((item) => {
+    const haystack = `${item.name} ${item.sku}`.toLowerCase()
+    if (query.trim() && !haystack.includes(query.trim().toLowerCase())) return false
+    if (kind && item.kind !== kind) return false
+    if (status && item.stock_status !== status) return false
+    return true
+  })
+  const paged = usePagedRows(filtered, `${query}|${kind}|${status}|${locationId}`)
+
+  if (editor) {
+    return (
+      <ItemFormPage
+        key={editor === 'new' ? 'new' : editor.id}
+        item={editor === 'new' ? null : editor}
+        editing={editing || editor === 'new'}
+        canEdit={canManage}
+        currency={currency}
+        codes={(items.data ?? []).map((row) => row.sku)}
+        notice={notice}
+        onEdit={() => setEditing(true)}
+        onBack={() => setEditing(false)}
+        onClose={() => { setEditor(null); setEditing(false) }}
+        onSaved={(saved) => { setEditor(saved); setEditing(false); setNotice('Item saved. Stock quantity was not changed.') }}
+      />
+    )
+  }
 
   return (
     <div className="grid gap-6">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold">Items</h2>
-          <p className="text-sm text-ink-soft">Step 1: list everything you buy, make, or sell. Click an item to edit it.</p>
+          <p className="text-sm text-ink-soft">Stock for the selected branch. Creating an item does not add quantity.</p>
         </div>
         {canManage ? (
-          <Button onClick={() => { setEditing(true); setEditor('new') }}>
+          <Button onClick={() => { setNotice(''); setEditing(true); setEditor('new') }}>
             <Plus className="h-4 w-4" />
             Add item
           </Button>
         ) : null}
       </div>
-      <label className="grid max-w-sm gap-1.5 text-sm">
-        <span className="sr-only">Search</span>
-        <input
-          className="h-11 rounded-xl border border-line bg-cream px-3"
-          value={query}
-          placeholder="Search by name"
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </label>
-      {items.isError ? <ErrorState error={items.error} onRetry={() => void items.refetch()} /> : (
+      {notice ? <p className="text-sm text-ink">{notice}</p> : null}
+      {deactivate.isError ? <p className="text-sm text-danger">{errorMessage(deactivate.error)}</p> : null}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <TextField label="Search" value={query} placeholder="Name or code" onChange={(event) => setQuery(event.target.value)} />
+        <SelectField label="Item type" value={kind} onChange={(event) => setKind(event.target.value)}>
+          <option value="">All types</option>
+          {itemKinds.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </SelectField>
+        <SelectField label="Branch or location" value={locationId} onChange={(event) => setLocationId(event.target.value)}>
+          {places.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+        </SelectField>
+        <SelectField label="Stock status" value={status} onChange={(event) => setStatus(event.target.value)}>
+          {stockStatuses.map(([value, label]) => <option key={value || 'all'} value={value}>{label}</option>)}
+        </SelectField>
+      </div>
+      {!locationId ? <p className="text-sm text-ink-soft">Loading locations…</p> : items.isError ? <ErrorState error={items.error} onRetry={() => void items.refetch()} /> : (
         <Panel>
-          <DataTable
-            caption="Items"
-            rows={paged.rows}
-            rowKey={(item) => item.id}
-            empty={query ? 'No items match that search.' : 'No items yet. Click “Add item” to create your first one, like Sugar or Boxes.'}
-            onRowClick={(item) => { setEditing(false); setEditor(item) }}
-            columns={[
-              { header: 'Item', render: (item) => <span className="font-medium">{item.name}</span> },
-              { header: 'Code', render: (item) => item.sku },
-              { header: 'Kind', render: (item) => kindLabel(item.kind) },
-              { header: 'Counted in', render: (item) => unitLabel(item.stock_unit || item.base_unit) },
-              {
-                header: 'Warn below',
-                render: (item) =>
-                  Number(item.minimum_stock) > 0 ? `${item.minimum_stock} ${unitLabel(item.stock_unit || item.base_unit)}` : '—',
-              },
-              { header: 'Expires', render: (item) => expiryLabel(item.expiry_date) },
-              { header: 'Status', render: (item) => (item.is_active ? 'In use' : 'Not in use') },
-            ]}
-          />
+          {items.isLoading ? <p className="p-4 text-sm text-ink-soft">Loading items…</p> : (
+            <DataTable
+              caption="Items"
+              rows={paged.rows}
+              rowKey={(item) => item.id}
+              empty={query || kind || status ? 'No items match these filters.' : 'No items yet. Add the first one, such as flour or boxes.'}
+              onRowClick={(item) => { setNotice(''); setEditing(false); setEditor(item) }}
+              columns={[
+                {
+                  header: 'Image',
+                  render: (item) => item.image_url
+                    ? <img src={item.image_url} alt="" className="h-10 w-10 rounded-lg object-cover" />
+                    : <span className="text-ink-soft">—</span>,
+                },
+                { header: 'Item name', render: (item) => <span className="font-medium">{item.name}</span> },
+                { header: 'Item code', render: (item) => item.sku },
+                { header: 'Item type', render: (item) => kindLabel(item.kind) },
+                { header: 'Current branch stock', render: (item) => item.branch_quantity ?? '—' },
+                { header: 'Stock unit', render: (item) => unitLabel(item.stock_unit || item.base_unit) },
+                {
+                  header: 'Inventory cost',
+                  render: (item) => `${item.standard_cost} ${currency}/${unitLabel(item.stock_unit || item.base_unit)}`.trim(),
+                },
+                { header: 'Minimum stock', render: (item) => item.branch_minimum ?? '—' },
+                { header: 'Stock status', render: (item) => item.stock_status ? <StatusBadge status={item.stock_status} /> : '—' },
+                {
+                  header: 'Actions',
+                  render: (item) => (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="secondary" onClick={(event) => { event.stopPropagation(); setNotice(''); setEditing(false); setEditor(item) }}>View</Button>
+                      {canManage ? <Button size="sm" variant="secondary" onClick={(event) => { event.stopPropagation(); setNotice(''); setEditing(true); setEditor(item) }}>Edit</Button> : null}
+                      {canManage && item.is_active ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={deactivate.isPending}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            if (!window.confirm(`Deactivate ${item.name}? Past movements stay as they are.`)) return
+                            deactivate.mutate(item.id)
+                          }}
+                        >
+                          Deactivate
+                        </Button>
+                      ) : null}
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          )}
           <Pager page={paged.page} pages={paged.pages} onPage={paged.setPage} />
         </Panel>
       )}
-      {editor ? (
-        <ItemModal
-          key={editor === 'new' ? 'new' : editor.id}
-          item={editor === 'new' ? null : editor}
-          editing={editing || editor === 'new'}
-          canEdit={canManage}
-          onEdit={() => setEditing(true)}
-          onBack={() => setEditing(false)}
-          onClose={() => setEditor(null)}
-          onSaved={(saved) => { setEditor(saved); setEditing(false) }}
-        />
-      ) : null}
     </div>
   )
 }
 
-function ItemModal({
+function ItemFormPage({
   item,
   editing,
   canEdit,
+  currency,
+  codes,
+  notice,
   onEdit,
   onBack,
   onClose,
@@ -136,6 +252,9 @@ function ItemModal({
   item: StockItem | null
   editing: boolean
   canEdit: boolean
+  currency: string
+  codes: string[]
+  notice: string
   onEdit: () => void
   onBack: () => void
   onClose: () => void
@@ -143,30 +262,13 @@ function ItemModal({
 }) {
   const queryClient = useQueryClient()
   const locations = useQuery({ queryKey: ['locations'], queryFn: listLocations })
+  const suppliers = useQuery({ queryKey: ['suppliers'], queryFn: listSuppliers })
   const places = (locations.data ?? []).filter((location) => location.kind !== 'IN_TRANSIT')
-  const [form, setForm] = useState(() =>
-    item
-      ? {
-          name: item.name,
-          sku: item.sku,
-          category: item.category,
-          kind: item.kind,
-          stock_unit: item.stock_unit || item.base_unit,
-          purchase_unit: item.purchase_unit || item.stock_unit || item.base_unit,
-          purchase_factor: item.purchase_factor || '1',
-          supplier_name: item.supplier_name,
-          costing_method: item.costing_method || 'MOVING_AVERAGE',
-          standard_cost: item.standard_cost,
-          minimum_stock: item.minimum_stock,
-          storage_location_id: item.storage_location ?? '',
-          tracks_batch: item.tracks_batch,
-          tracks_expiry: item.tracks_expiry,
-          expiry_date: item.expiry_date ?? '',
-          tracks_stock: item.tracks_stock,
-          is_active: item.is_active,
-        }
-      : emptyItem,
-  )
+  const [form, setForm] = useState<ItemForm>(() => (item ? formFromItem(item) : emptyItem))
+  const [supplierName, setSupplierName] = useState('')
+  const suggested = previewCode(form.name, codes, item?.sku ?? '')
+  const codeValue = item ? item.sku : suggested
+  const locked = Boolean(item) && !editing
   const save = useMutation({
     mutationFn: (input: ItemInput) => (item ? updateItem(item.id, input) : createItem(input)),
     onSuccess: async (saved) => {
@@ -174,179 +276,206 @@ function ItemModal({
       onSaved(saved)
     },
   })
-  function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
+  const addSupplier = useMutation({
+    mutationFn: () => createSupplier(supplierName.trim()),
+    onSuccess: async (supplier) => {
+      await queryClient.invalidateQueries({ queryKey: ['suppliers'] })
+      setForm((current) => ({
+        ...current,
+        default_supplier_id: current.default_supplier_id || supplier.id,
+        supplier_ids: current.supplier_ids.includes(supplier.id) ? current.supplier_ids : [...current.supplier_ids, supplier.id],
+      }))
+      setSupplierName('')
+    },
+  })
+  function set<K extends keyof ItemForm>(key: K, value: ItemForm[K]) {
     setForm((current) => ({ ...current, [key]: value }))
   }
-  const unit = unitLabel(form.stock_unit)
-  if (item && !editing) {
-    return (
-      <Modal open title={item.name} onClose={onClose}>
-        <dl className="grid gap-3 sm:grid-cols-2">
-          <Fact label="Item code" value={item.sku} />
-          <Fact label="Kind" value={kindLabel(item.kind)} />
-          <Fact label="Counted in" value={unitLabel(item.stock_unit || item.base_unit)} />
-          <Fact label="Warn below" value={Number(item.minimum_stock) > 0 ? `${item.minimum_stock} ${unitLabel(item.stock_unit || item.base_unit)}` : '—'} />
-          <Fact label="Expires" value={item.tracks_expiry ? expiryLabel(item.expiry_date) : 'Does not expire'} />
-          <Fact label="Group" value={item.category || '—'} />
-          <Fact label="Supplier" value={item.supplier_name || '—'} />
-          <Fact label="Status" value={item.is_active ? 'In use' : 'Not in use'} />
-        </dl>
-        <div className="mt-6 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>Close</Button>
-          {canEdit ? <Button onClick={onEdit}>Edit</Button> : null}
-        </div>
-      </Modal>
-    )
+  function togglePolicy(locationId: string, checked: boolean) {
+    setForm((current) => ({
+      ...current,
+      policies: checked
+        ? [...current.policies, { location_id: locationId, minimum_quantity: '0' }]
+        : current.policies.filter((row) => row.location_id !== locationId),
+    }))
   }
+  const unit = unitLabel(form.stock_unit)
+  const supplierLabel = suppliers.data?.find((row) => row.id === form.default_supplier_id)?.name || item?.default_supplier_name || '—'
+
   return (
-    <Modal open title={item ? 'Edit item' : 'Add an item'} onClose={onClose}>
-      <form
-        className="grid gap-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          const payload: ItemInput = {
-            ...form,
-            storage_location_id: form.storage_location_id || null,
-            expiry_date: form.tracks_expiry && form.expiry_date ? form.expiry_date : null,
-          }
-          delete payload.sku
-          save.mutate(payload)
-        }}
-      >
-        <TextField
-          label="Item code"
-          value={item?.sku || 'Assigned when you save'}
-          disabled
-          hint="Created automatically, like ITM-0001. This cannot be changed."
-        />
-        <TextField
-          label="1. Item name"
-          required
-          autoFocus
-          placeholder="Example: Sugar"
-          value={form.name}
-          onChange={(event) => set('name', event.target.value)}
-        />
-        <SelectField label="2. What kind of item is it?" value={form.kind} onChange={(event) => set('kind', event.target.value)}>
-          {kindChoices.map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </SelectField>
-        <SelectField
-          label="3. How do you count it?"
-          value={form.stock_unit}
-          hint="Pick the unit you use in the kitchen."
-          onChange={(event) => {
-            const stock_unit = event.target.value
-            setForm((current) => {
-              const purchase_unit = item ? current.purchase_unit : stock_unit
-              return {
-                ...current,
-                stock_unit,
-                purchase_unit,
-                purchase_factor: defaultPurchaseFactor(purchase_unit, stock_unit),
-              }
-            })
-          }}
-        >
-          {stockUnits.map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </SelectField>
-        <TextField
-          label={`4. Warn me when stock is below (${unit})`}
-          inputMode="decimal"
-          value={form.minimum_stock}
-          hint="Optional. Leave 0 if you don't want a warning."
-          onChange={(event) => set('minimum_stock', event.target.value)}
-        />
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.tracks_expiry}
-            onChange={(event) => {
-              const tracks_expiry = event.target.checked
-              setForm((current) => ({ ...current, tracks_expiry, expiry_date: tracks_expiry ? current.expiry_date : '' }))
-            }}
-          />
-          This item expires
-        </label>
-        {form.tracks_expiry ? (
-          <TextField
-            label="Expires on"
-            type="date"
-            required
-            value={form.expiry_date}
-            hint="The date the whole stock of this item should be used by."
-            onChange={(event) => set('expiry_date', event.target.value)}
-          />
-        ) : null}
-
-        <details className="rounded-xl border border-line px-3 py-2">
-          <summary className="cursor-pointer text-sm font-medium">More options (optional)</summary>
-          <div className="mt-3 grid gap-4 sm:grid-cols-2">
-            <TextField label="Group" value={form.category} hint="Example: Dairy, Nuts" onChange={(event) => set('category', event.target.value)} />
-            <TextField label={`Cost per ${unit}`} inputMode="decimal" value={form.standard_cost} onChange={(event) => set('standard_cost', event.target.value)} />
-            <TextField label="Supplier" value={form.supplier_name} onChange={(event) => set('supplier_name', event.target.value)} />
-            <SelectField
-              label="You buy it in"
-              value={form.purchase_unit}
-              onChange={(event) => {
-                const purchase_unit = event.target.value
-                setForm((current) => ({
-                  ...current,
-                  purchase_unit,
-                  purchase_factor: defaultPurchaseFactor(purchase_unit, current.stock_unit),
-                }))
-              }}
-            >
-              {stockUnits.map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </SelectField>
-            <TextField
-              label={`1 ${unitLabel(form.purchase_unit)} = how many ${unit}?`}
-              inputMode="decimal"
-              value={form.purchase_factor}
-              onChange={(event) => set('purchase_factor', event.target.value)}
-            />
-            <SelectField label="Where is it stored?" value={form.storage_location_id} onChange={(event) => set('storage_location_id', event.target.value)}>
-              <option value="">Not set</option>
-              {places.map((location) => (
-                <option key={location.id} value={location.id}>{location.name}</option>
-              ))}
-            </SelectField>
-            <SelectField label="Cost method" value={form.costing_method} onChange={(event) => set('costing_method', event.target.value)}>
-              {costingMethods.map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </SelectField>
-            <div className="grid gap-2 sm:col-span-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={form.tracks_batch} onChange={(event) => set('tracks_batch', event.target.checked)} />
-                It comes in batches
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={form.tracks_stock} onChange={(event) => set('tracks_stock', event.target.checked)} />
-                Count how much I have
-              </label>
-              {item ? (
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={form.is_active} onChange={(event) => set('is_active', event.target.checked)} />
-                  Item is in use
-                </label>
-              ) : null}
-            </div>
-          </div>
-        </details>
-
-        {save.isError ? <p className="text-sm text-danger">{errorMessage(save.error)}</p> : null}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={item ? onBack : onClose}>Cancel</Button>
-          <Button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save item'}</Button>
+    <div className="grid gap-6">
+      <PageHeader
+        title={item ? item.name : 'New item'}
+        description="Item profile. Saving this does not add stock."
+        action={
+          <button type="button" className="text-sm text-ink-soft underline-offset-2 hover:underline" onClick={onClose}>
+            Back to items
+          </button>
+        }
+      />
+      {item ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <StatusBadge status={item.is_active ? 'active' : 'inactive'} />
+          {item.stock_status ? <StatusBadge status={item.stock_status} /> : null}
+          <span className="text-sm text-ink-soft">{item.sku} · {kindLabel(item.kind)}</span>
         </div>
-      </form>
-    </Modal>
+      ) : null}
+      {notice ? <p className="text-sm text-ink">{notice}</p> : null}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
+        <Panel>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-display text-2xl tracking-tight">Details</h2>
+            {canEdit && item && !editing ? <Button variant="secondary" onClick={onEdit}>Edit</Button> : null}
+          </div>
+          <form
+            className="mt-5 grid gap-4 sm:grid-cols-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              save.mutate(payload(form))
+            }}
+          >
+            <h3 className="text-sm font-medium sm:col-span-2">Basic information</h3>
+            <div className="sm:col-span-2">
+              <ImageField
+                purpose="item"
+                imageUrl={item?.image_url ?? null}
+                disabled={locked}
+                onChange={(imageKey) => set('image_key', imageKey)}
+              />
+            </div>
+            <TextField label="Item name *" required disabled={locked} value={form.name} placeholder="Pistachio kunafa" onChange={(event) => set('name', event.target.value)} />
+            <TextField
+              label="Item code"
+              readOnly
+              disabled
+              value={codeValue}
+              hint={item ? 'This code stays the same if you rename the item.' : 'Preview from the name. Pistachio kunafa becomes PIST-01. The server assigns the final code.'}
+            />
+            <SelectField label="Item type *" required disabled={locked} value={form.kind} onChange={(event) => set('kind', event.target.value)}>
+              {itemKinds.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </SelectField>
+            <SelectField label="Stock unit *" required disabled={locked} value={form.stock_unit} onChange={(event) => set('stock_unit', event.target.value)}>
+              {stockUnits.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </SelectField>
+
+            <h3 className="text-sm font-medium sm:col-span-2">Cost and valuation</h3>
+            <TextField
+              label={`Default cost per ${unit}${currency ? ` (${currency})` : ''}`}
+              disabled={locked}
+              inputMode="decimal"
+              value={form.standard_cost}
+              hint="A reference value. Record the real purchase cost when stock is received."
+              onChange={(event) => set('standard_cost', event.target.value)}
+            />
+            <SelectField label="Cost method" disabled={locked} value={form.costing_method} onChange={(event) => set('costing_method', event.target.value)}>
+              {costingMethods.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </SelectField>
+
+            <h3 className="text-sm font-medium sm:col-span-2">Suppliers</h3>
+            <SelectField label="Default supplier" disabled={locked} value={form.default_supplier_id} onChange={(event) => set('default_supplier_id', event.target.value)}>
+              <option value="">None</option>
+              {(suppliers.data ?? []).map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+            </SelectField>
+            <div className="grid gap-2">
+              <span className="text-sm font-medium">Also supplied by</span>
+              <div className="grid gap-2">
+                {(suppliers.data ?? []).filter((supplier) => supplier.id !== form.default_supplier_id).map((supplier) => (
+                  <label key={supplier.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      disabled={locked}
+                      checked={form.supplier_ids.includes(supplier.id)}
+                      onChange={(event) => {
+                        set('supplier_ids', event.target.checked
+                          ? [...form.supplier_ids, supplier.id]
+                          : form.supplier_ids.filter((id) => id !== supplier.id))
+                      }}
+                    />
+                    {supplier.name}
+                  </label>
+                ))}
+                {(suppliers.data ?? []).length === 0 ? <p className="text-sm text-ink-soft">No suppliers yet.</p> : null}
+              </div>
+            </div>
+            {editing ? (
+              <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+                <div className="min-w-48 flex-1">
+                  <TextField label="Add a supplier" value={supplierName} onChange={(event) => setSupplierName(event.target.value)} placeholder="Supplier name" />
+                </div>
+                <Button type="button" variant="secondary" disabled={!supplierName.trim() || addSupplier.isPending} onClick={() => addSupplier.mutate()}>
+                  {addSupplier.isPending ? 'Adding…' : 'Add supplier'}
+                </Button>
+              </div>
+            ) : null}
+            {addSupplier.isError ? <p className="text-sm text-danger sm:col-span-2">{errorMessage(addSupplier.error)}</p> : null}
+
+            <h3 className="text-sm font-medium sm:col-span-2">Where it is stocked</h3>
+            <div className="grid gap-3 sm:col-span-2">
+              <p className="text-sm text-ink-soft">Minimum stock is per location, in {unit}. Alerts apply only where this item is stocked.</p>
+              {places.map((location) => {
+                const policy = form.policies.find((row) => row.location_id === location.id)
+                return (
+                  <div key={location.id} className="grid gap-2 rounded-xl border border-line px-3 py-3 sm:grid-cols-[1fr_180px] sm:items-center">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" disabled={locked} checked={Boolean(policy)} onChange={(event) => togglePolicy(location.id, event.target.checked)} />
+                      {location.name}
+                    </label>
+                    {policy ? (
+                      <TextField
+                        label={`Minimum (${unit})`}
+                        disabled={locked}
+                        inputMode="decimal"
+                        value={policy.minimum_quantity}
+                        onChange={(event) => {
+                          const minimum_quantity = event.target.value
+                          set('policies', form.policies.map((row) => row.location_id === location.id ? { ...row, minimum_quantity } : row))
+                        }}
+                      />
+                    ) : <span className="text-sm text-ink-soft">Not stocked here</span>}
+                  </div>
+                )
+              })}
+            </div>
+
+            {save.isError ? <p className="text-sm text-danger sm:col-span-2">{errorMessage(save.error)}</p> : null}
+            {editing ? (
+              <div className="flex gap-2 sm:col-span-2">
+                <Button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save changes'}</Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    if (!item) {
+                      onClose()
+                      return
+                    }
+                    setForm(formFromItem(item))
+                    onBack()
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : null}
+          </form>
+        </Panel>
+        <div className="grid content-start gap-6">
+          <Panel>
+            <h2 className="font-display text-2xl tracking-tight">At a glance</h2>
+            <dl className="mt-4 grid gap-3">
+              <Fact label="Code" value={codeValue || '—'} />
+              <Fact label="Type" value={kindLabel(form.kind)} />
+              <Fact label="Stock unit" value={unit} />
+              <Fact label="Reference cost" value={`${form.standard_cost || '0'} ${currency}/${unit}`.trim()} />
+              <Fact label="Cost method" value={form.costing_method === 'FIFO' ? 'FIFO' : 'Weighted average'} />
+              <Fact label="Default supplier" value={supplierLabel} />
+              <Fact label="Branch stock" value={item?.branch_quantity ?? '0'} />
+              <Fact label="Minimum here" value={item?.branch_minimum ?? '—'} />
+            </dl>
+          </Panel>
+        </div>
+      </div>
+    </div>
   )
 }
 

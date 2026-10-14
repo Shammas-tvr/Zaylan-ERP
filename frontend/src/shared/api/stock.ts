@@ -11,16 +11,37 @@ export type StockItem = {
   purchase_unit: string
   purchase_factor: string
   supplier_name: string
+  default_supplier: string | null
+  default_supplier_name: string | null
+  supplier_ids: string[]
+  stock_policies: Array<{ location: string; location_name: string; minimum_quantity: string }>
   costing_method: string
   standard_cost: string
   minimum_stock: string
   storage_location: string | null
   storage_location_name: string | null
+  branch_quantity: string | null
+  branch_minimum: string | null
+  stock_status: 'normal' | 'low' | 'out' | 'unstocked' | null
   tracks_batch: boolean
   tracks_expiry: boolean
   expiry_date: string | null
   tracks_stock: boolean
+  image_key: string
+  image_url: string | null
   is_active: boolean
+}
+
+export type ProductCosting = {
+  recipe_id: string | null
+  recipe_status: string
+  recipe_version: number | null
+  ingredient_cost: string
+  labour_cost: string
+  overhead_cost: string
+  estimated_cost: string
+  gross_profit: string | null
+  gross_margin: string | null
 }
 
 export type ProductMaster = {
@@ -28,13 +49,19 @@ export type ProductMaster = {
   sku: string
   name: string
   category: string
+  description: string
+  image_key: string
+  image_url: string | null
   selling_price: string
+  labour_cost: string
+  overhead_cost: string
   sale_unit: string
   kind: string
   inventory_item: string | null
   inventory_item_name: string | null
   branch_ids: string[]
   is_active: boolean
+  costing: ProductCosting
 }
 
 export type ItemInput = {
@@ -43,18 +70,22 @@ export type ItemInput = {
   kind: string
   category?: string
   stock_unit: string
-  purchase_unit: string
-  purchase_factor: string
+  purchase_unit?: string
+  purchase_factor?: string
   supplier_name?: string
+  default_supplier_id?: string | null
+  supplier_ids?: string[]
+  stock_policies?: Array<{ location_id: string; minimum_quantity: string }>
   costing_method: string
   standard_cost: string
-  minimum_stock: string
+  minimum_stock?: string
   storage_location_id?: string | null
-  tracks_batch: boolean
-  tracks_expiry: boolean
+  tracks_batch?: boolean
+  tracks_expiry?: boolean
   expiry_date?: string | null
-  tracks_stock: boolean
-  is_active: boolean
+  tracks_stock?: boolean
+  image_key?: string
+  is_active?: boolean
 }
 
 export type RecipeLine = {
@@ -80,6 +111,8 @@ export type Recipe = {
   expected_waste_percent: string
   product: string | null
   ingredient_cost: string
+  ingredient_cost_per_unit?: string
+  status?: string
   is_active: boolean
   lines: RecipeLine[]
 }
@@ -145,6 +178,37 @@ async function getList<T>(url: string) {
 }
 
 export const listItems = () => getList<StockItem>('/catalog/items/')
+
+export function listItemsAt(location: string) {
+  return getList<StockItem>(`/catalog/items/?location=${encodeURIComponent(location)}`)
+}
+
+export type Supplier = { id: string; name: string; is_active: boolean }
+
+export const listSuppliers = () => getList<Supplier>('/catalog/suppliers/')
+
+export async function requestImageUpload(input: { purpose: 'product' | 'item'; content_type: string; filename: string }) {
+  const { data } = await client.post<{ object_key: string; upload_url: string; headers: Record<string, string>; max_bytes: number }>(
+    '/catalog/images/',
+    input,
+  )
+  return data
+}
+
+export async function uploadCatalogImage(file: File, purpose: 'product' | 'item') {
+  const ticket = await requestImageUpload({ purpose, content_type: file.type, filename: file.name })
+  if (file.size > ticket.max_bytes) {
+    throw new Error('That image is too large.')
+  }
+  const response = await fetch(ticket.upload_url, { method: 'PUT', body: file, headers: ticket.headers })
+  if (!response.ok) throw new Error('The image could not be uploaded.')
+  return ticket.object_key
+}
+
+export async function createSupplier(name: string) {
+  const { data } = await client.post<Supplier>('/catalog/suppliers/', { name })
+  return data
+}
 export const listProducts = () => getList<ProductMaster>('/catalog/products/')
 export const listRecipes = () => getList<Recipe>('/catalog/recipes/')
 export type StockLocation = {
@@ -223,40 +287,33 @@ export async function createItem(input: ItemInput) {
   return data
 }
 
-export async function updateItem(id: string, input: ItemInput) {
+export async function updateItem(id: string, input: Partial<ItemInput>) {
   const { data } = await client.patch<StockItem>(`/catalog/items/${id}/`, input)
   return data
 }
 
-export async function createProduct(input: {
+export type ProductInput = {
   sku?: string
   name: string
   category?: string
+  description?: string
+  image_key?: string
   selling_price: string
+  labour_cost?: string
+  overhead_cost?: string
   sale_unit: string
   kind: string
   inventory_item_id?: string | null
   branch_ids: string[]
   is_active: boolean
-}) {
+}
+
+export async function createProduct(input: ProductInput) {
   const { data } = await client.post<ProductMaster>('/catalog/products/', input)
   return data
 }
 
-export async function updateProduct(
-  id: string,
-  input: {
-    sku?: string
-    name: string
-    category?: string
-    selling_price: string
-    sale_unit: string
-    kind: string
-    inventory_item_id?: string | null
-    branch_ids: string[]
-    is_active: boolean
-  },
-) {
+export async function updateProduct(id: string, input: Partial<ProductInput>) {
   const { data } = await client.patch<ProductMaster>(`/catalog/products/${id}/`, input)
   return data
 }
@@ -267,6 +324,7 @@ export async function createRecipe(input: {
   effective_from: string
   yield_quantity: string
   expected_waste_percent?: string
+  status?: 'DRAFT' | 'CONFIRMED'
   lines: Array<{ ingredient_id: string; quantity: string; unit: string; consume_at: string }>
 }) {
   const { data } = await client.post<Recipe>('/catalog/recipes/', input)

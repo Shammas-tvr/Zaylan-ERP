@@ -25,6 +25,10 @@ const tones: Record<string, string> = {
   voided: 'bg-cream-deep text-ink-soft',
   rejected: 'bg-danger-soft text-danger',
   paid: 'bg-success-soft text-success',
+  normal: 'bg-success-soft text-success',
+  low: 'bg-warning-soft text-warning',
+  out: 'bg-danger-soft text-danger',
+  unstocked: 'bg-cream-deep text-ink-soft',
 }
 
 export function StatusBadge({ status }: { status: string }) {
